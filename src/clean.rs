@@ -57,7 +57,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
     fn new(
         vertices: &'a mut Vec<V>,
         edges: impl Iterator<Item = (VertexIndex, VertexIndex, DirtyFlag)>,
-    ) -> Option<Self> {
+    ) -> Self {
         let mut edge_info = Vec::new();
         let mut hilbert_to_edges = BTreeSet::new();
         let mut vertex_to_edges = BTreeSet::new();
@@ -83,7 +83,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         // Loop over our edges to find the extents
         let extents = V::extents(edge_info.iter().map(|&EdgeInfo { start, end, .. }| {
             (&vertices[start as usize], &vertices[end as usize])
-        }))?;
+        }));
 
         // Now that we have the extents,
         // fill in the rest of the missing data
@@ -117,7 +117,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         // Build the R-tree
         let r_tree = RTree::build(hilbert_to_rect);
 
-        Some(Self {
+        Self {
             vertices,
             edge_info,
             extents,
@@ -125,7 +125,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             vertex_to_edges,
             dirty_set,
             r_tree,
-        })
+        }
     }
 
     /// Insert a new edge into the spatial index
@@ -243,6 +243,8 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
                     }
 
                     // Test 2: Check for vertex on edge
+                    // TODO: Combine these two loops into a single `for` loop over pairs of (edge, vertex)
+                    // TODO: like for vertices above.
                     // Check if either endpoint of dirty_edge lies on candidate_edge
                     for &vertex_idx in &[dirty_info.start, dirty_info.end] {
                         if vertex_idx != candidate_info.start
@@ -301,77 +303,76 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             }
 
             // Handle the action if one was found
-            if let Some(act) = action {
-                match act {
-                    Action::MergeVertices { v1, v2 } => {
-                        // Add merged vertex as a new vertex
-                        let merged_vertex =
-                            self.vertices[v1 as usize].merged_with(&self.vertices[v2 as usize]);
-                        let new_v = self.vertices.len() as VertexIndex;
-                        self.vertices.push(merged_vertex);
+            match action {
+                Some(Action::MergeVertices { v1, v2 }) => {
+                    // Add merged vertex as a new vertex
+                    let merged_vertex =
+                        self.vertices[v1 as usize].merged_with(&self.vertices[v2 as usize]);
+                    let new_v = self.vertices.len() as VertexIndex;
+                    self.vertices.push(merged_vertex);
 
-                        // Update all edges referencing v1 or v2
-                        for v in [v1, v2] {
-                            while let Some(edge_idx) = { self.edges_for_vertex(v).next() } {
-                                let EdgeInfo {
-                                    mut start, mut end, ..
-                                } = self.edge_info[edge_idx as usize];
-                                if start == v {
-                                    start = new_v;
-                                }
-                                if end == v {
-                                    end = new_v;
-                                }
-                                self.edit(edge_idx, start, end);
+                    // Update all edges referencing v1 or v2
+                    for v in [v1, v2] {
+                        while let Some(edge_idx) = { self.edges_for_vertex(v).next() } {
+                            let EdgeInfo {
+                                mut start, mut end, ..
+                            } = self.edge_info[edge_idx as usize];
+                            if start == v {
+                                start = new_v;
                             }
+                            if end == v {
+                                end = new_v;
+                            }
+                            self.edit(edge_idx, start, end);
                         }
                     }
-                    Action::SplitEdge { edge, split_vertex } => {
-                        let EdgeInfo {
-                            start,
-                            end: old_end,
-                            hilbert_value,
-                            ..
-                        } = self.edge_info[edge as usize];
-
-                        // Shorten the original edge
-                        self.edit(edge, start, split_vertex);
-
-                        // Create new edge from split point to old endpoint
-                        self.insert(split_vertex, old_end, hilbert_value);
-                    }
-                    Action::SplitBothEdges {
-                        edge_a,
-                        edge_b,
-                        intersection,
-                    } => {
-                        // Add intersection point as a new vertex
-                        let new_vertex_idx = self.vertices.len() as VertexIndex;
-                        self.vertices.push(intersection);
-
-                        // Get edge info before modifying edges
-                        let EdgeInfo {
-                            start: edge_a_start,
-                            end: edge_a_end,
-                            hilbert_value: edge_a_hilbert,
-                            ..
-                        } = self.edge_info[edge_a as usize];
-                        let EdgeInfo {
-                            start: edge_b_start,
-                            end: edge_b_end,
-                            hilbert_value: edge_b_hilbert,
-                            ..
-                        } = self.edge_info[edge_b as usize];
-
-                        // Shorten both edges to intersection point
-                        self.edit(edge_a, edge_a_start, new_vertex_idx);
-                        self.edit(edge_b, edge_b_start, new_vertex_idx);
-
-                        // Create new edges from intersection to old endpoints
-                        self.insert(new_vertex_idx, edge_a_end, edge_a_hilbert);
-                        self.insert(new_vertex_idx, edge_b_end, edge_b_hilbert);
-                    }
                 }
+                Some(Action::SplitEdge { edge, split_vertex }) => {
+                    let EdgeInfo {
+                        start,
+                        end: old_end,
+                        hilbert_value,
+                        ..
+                    } = self.edge_info[edge as usize];
+
+                    // Shorten the original edge
+                    self.edit(edge, start, split_vertex);
+
+                    // Create new edge from split point to old endpoint
+                    self.insert(split_vertex, old_end, hilbert_value);
+                }
+                Some(Action::SplitBothEdges {
+                    edge_a,
+                    edge_b,
+                    intersection,
+                }) => {
+                    // Add intersection point as a new vertex
+                    let new_vertex_idx = self.vertices.len() as VertexIndex;
+                    self.vertices.push(intersection);
+
+                    // Get edge info before modifying edges
+                    let EdgeInfo {
+                        start: edge_a_start,
+                        end: edge_a_end,
+                        hilbert_value: edge_a_hilbert,
+                        ..
+                    } = self.edge_info[edge_a as usize];
+                    let EdgeInfo {
+                        start: edge_b_start,
+                        end: edge_b_end,
+                        hilbert_value: edge_b_hilbert,
+                        ..
+                    } = self.edge_info[edge_b as usize];
+
+                    // Shorten both edges to intersection point
+                    self.edit(edge_a, edge_a_start, new_vertex_idx);
+                    self.edit(edge_b, edge_b_start, new_vertex_idx);
+
+                    // Create new edges from intersection to old endpoints
+                    self.insert(new_vertex_idx, edge_a_end, edge_a_hilbert);
+                    self.insert(new_vertex_idx, edge_b_end, edge_b_hilbert);
+                }
+                None => {}
             }
         }
     }
@@ -393,10 +394,7 @@ pub fn partial_clean<V: Vertex>(
     vertices: &mut Vec<V>,
     edges: impl Iterator<Item = (VertexIndex, VertexIndex, DirtyFlag)>,
 ) -> Vec<(u32, u32)> {
-    let Some(mut spatial_index) = SpatialIndex::new(vertices, edges) else {
-        // No input edges
-        return vec![];
-    };
+    let mut spatial_index = SpatialIndex::new(vertices, edges);
     spatial_index.clean();
     spatial_index.extract_edges()
 }

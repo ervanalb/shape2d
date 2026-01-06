@@ -1,5 +1,6 @@
 /// Axis-aligned bounding rectangle with u16 coordinates
 /// Inclusive on all bounds
+// TODO: convert this into two fields, min: [u16; 2], max: [u16; 2]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
     pub min_x: u16,
@@ -9,12 +10,15 @@ pub struct Rect {
 }
 
 impl Default for Rect {
+    /// This default value is an invalid rect
+    /// that is designed so that when combined with any valid rect,
+    /// it will yield that rect back.
     fn default() -> Self {
         Self {
-            min_x: 0,
-            max_x: u16::MAX,
-            min_y: 0,
-            max_y: u16::MAX,
+            min_x: u16::MAX,
+            max_x: 0,
+            min_y: u16::MAX,
+            max_y: 0,
         }
     }
 }
@@ -34,32 +38,21 @@ impl Rect {
     /// that bounds both
     pub fn combine(&self, other: &Self) -> Self {
         Self {
-            min_x: if self.min_x < other.min_x {
-                self.min_x
-            } else {
-                other.min_x
-            },
-            max_x: if self.max_x > other.max_x {
-                self.max_x
-            } else {
-                other.max_x
-            },
-            min_y: if self.min_y < other.min_y {
-                self.min_y
-            } else {
-                other.min_y
-            },
-            max_y: if self.max_y > other.max_y {
-                self.max_y
-            } else {
-                other.max_y
-            },
+            min_x: self.min_x.min(other.min_x),
+            max_x: self.max_x.max(other.max_x),
+            min_y: self.min_y.min(other.min_y),
+            max_y: self.max_y.max(other.max_y),
         }
     }
 
     /// Check if two rectangles overlap (including touching on any side or corner)
+    /// Returns false if either rect is invalid (max < min)
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.min_x <= other.max_x
+        self.min_x <= self.max_x
+            && self.min_y <= self.max_y
+            && other.min_x <= other.max_x
+            && other.min_y <= other.max_y
+            && self.min_x <= other.max_x
             && self.max_x >= other.min_x
             && self.min_y <= other.max_y
             && self.max_y >= other.min_y

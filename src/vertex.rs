@@ -3,7 +3,7 @@ use std::ops::{Add, Div, Mul, Neg, Sub};
 
 /// Trait that vertex types must implement to be used with the clean algorithm
 pub trait Vertex: Clone {
-    type Extents;
+    type Extents: Default;
 
     /// Check if two vertices are coincident (at the same location)
     fn is_coincident(&self, other: &Self) -> bool;
@@ -24,7 +24,7 @@ pub trait Vertex: Clone {
 
     /// Generate an "extents" object from a list of edges,
     /// which is used when calculating the edge_bbox
-    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Option<Self::Extents>
+    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Self::Extents
     where
         Self: 'a;
 
@@ -57,10 +57,7 @@ pub trait Epsilon: Copy {
 
     /// Generate an "extents" object from a list of edges,
     /// which is used when calculating the edge_bbox
-    fn extents(
-        self,
-        vertices: impl Iterator<Item = ([Self; 2], [Self; 2])>,
-    ) -> Option<Self::Extents>;
+    fn extents(self, vertices: impl Iterator<Item = ([Self; 2], [Self; 2])>) -> Self::Extents;
 
     /// Compute the axis-aligned bounding box of an edge
     fn edge_bbox(
@@ -78,12 +75,13 @@ trait MapToU16<T> {
 /// Helper trait to provide float-specific specialization
 trait Float:
     Copy
+    + Default
+    + PartialOrd
     + Add<Output = Self>
     + Sub<Output = Self>
     + Mul<Output = Self>
     + Div<Output = Self>
     + Neg<Output = Self>
-    + PartialOrd
 {
     fn zero() -> Self;
     fn one() -> Self;
@@ -142,7 +140,7 @@ impl Float for f64 {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct FloatExtents<T> {
     scale: [T; 2],
     offset: [T; 2],
@@ -240,11 +238,10 @@ impl<T: Float> Epsilon for T {
         [half * (a[0] + b[0]), half * (a[1] + b[1])]
     }
 
-    fn extents(
-        self,
-        mut edges: impl Iterator<Item = ([Self; 2], [Self; 2])>,
-    ) -> Option<Self::Extents> {
-        let (min, max) = edges.next()?;
+    fn extents(self, mut edges: impl Iterator<Item = ([Self; 2], [Self; 2])>) -> Self::Extents {
+        let Some((min, max)) = edges.next() else {
+            return Default::default();
+        };
         let (min, max) = edges.fold((min, max), |(min, max), (start, end)| {
             (
                 [
@@ -264,7 +261,7 @@ impl<T: Float> Epsilon for T {
         ];
         let offset = [-min[0] * scale[0], -min[1] * scale[1]];
 
-        Some(FloatExtents { scale, offset })
+        FloatExtents { scale, offset }
     }
 
     fn edge_bbox(self, edge_start: &[T; 2], edge_end: &[T; 2], extents: &Self::Extents) -> Rect {
@@ -325,7 +322,7 @@ impl Vertex for VertexF32 {
         DEFAULT_EPSILON_F32.merged_with(self, other)
     }
 
-    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Option<Self::Extents>
+    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Self::Extents
     where
         Self: 'a,
     {
@@ -361,7 +358,7 @@ impl Vertex for VertexF64 {
         DEFAULT_EPSILON_F64.merged_with(self, other)
     }
 
-    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Option<Self::Extents>
+    fn extents<'a>(edges: impl Iterator<Item = (&'a Self, &'a Self)>) -> Self::Extents
     where
         Self: 'a,
     {
@@ -479,7 +476,6 @@ mod tests {
         let b_end = [1.0, 0.0];
 
         let result = <[f32; 2]>::from_intersection(&a_start, &a_end, &b_start, &b_end);
-        assert!(result.is_some());
         assert!(result.unwrap().is_coincident(&[0.5, 0.5]));
     }
 
@@ -491,7 +487,6 @@ mod tests {
         let b_end = [0.5, 1.0];
 
         let result = <[f32; 2]>::from_intersection(&a_start, &a_end, &b_start, &b_end);
-        assert!(result.is_some());
         assert!(result.unwrap().is_coincident(&[0.5, 0.5]));
     }
 
@@ -539,7 +534,6 @@ mod tests {
         let b_end = [1.0, 0.0];
 
         let result = <[f32; 2]>::from_intersection(&a_start, &a_end, &b_start, &b_end);
-        assert!(result.is_some());
         assert!(result.unwrap().is_coincident(&[0.5, 0.5]));
     }
 
@@ -583,7 +577,7 @@ mod tests {
     fn test_edge_bbox_horizontal() {
         let start = [0.2_f32, 0.5];
         let end = [0.8, 0.5];
-        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter()).unwrap();
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
         assert!(bbox.min_x < bbox.max_x);
@@ -595,7 +589,7 @@ mod tests {
     fn test_edge_bbox_vertical() {
         let start = [0.5_f32, 0.2];
         let end = [0.5, 0.8];
-        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter()).unwrap();
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
         assert!(bbox.min_x <= bbox.max_x);
@@ -607,7 +601,7 @@ mod tests {
     fn test_edge_bbox_diagonal() {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 1.0];
-        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter()).unwrap();
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
         assert!(bbox.min_x < bbox.max_x);
@@ -619,11 +613,43 @@ mod tests {
     fn test_edge_bbox_point_edge() {
         let start = [0.5_f32, 0.5];
         let end = [0.5, 0.5];
-        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter()).unwrap();
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
         assert!(bbox.min_x <= bbox.max_x);
         assert!(bbox.min_y <= bbox.max_y);
         assert!(bbox.overlaps(&bbox));
+    }
+
+    #[test]
+    fn test_bboxes_overlap() {
+        // Edge 1 is horizontal
+        let start1 = [0.5_f32, 0.];
+        let end1 = [0.5, 1.];
+
+        // Edge 2 is vertical
+        let start2 = [0.5_f32, 0.5];
+        let end2 = [1., 0.5];
+
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
+        let bbox1 = <[f32; 2]>::edge_bbox(&start1, &end1, &extents);
+        let bbox2 = <[f32; 2]>::edge_bbox(&start2, &end2, &extents);
+
+        assert!(bbox1.overlaps(&bbox2));
+    }
+
+    #[test]
+    fn test_bboxes_dont_overlap() {
+        let start1 = [0.1_f32, 0.1];
+        let end1 = [0.2, 0.2];
+
+        let start2 = [0.2_f32, 0.4];
+        let end2 = [0.1, 0.5];
+
+        let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
+        let bbox1 = <[f32; 2]>::edge_bbox(&start1, &end1, &extents);
+        let bbox2 = <[f32; 2]>::edge_bbox(&start2, &end2, &extents);
+
+        assert!(!bbox1.overlaps(&bbox2));
     }
 }
