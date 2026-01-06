@@ -246,9 +246,9 @@ mod tests {
         let test_rect = Rect::new(5, 15, 5, 15);
         let results: Vec<u32> = tree.search(&test_rect).collect();
 
+        assert!(results.len() == 2);
         assert!(results.contains(&10));
         assert!(results.contains(&20));
-        assert!(!results.contains(&30));
     }
 
     #[test]

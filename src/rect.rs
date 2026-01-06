@@ -85,6 +85,18 @@ mod tests {
     }
 
     #[test]
+    fn test_combine_with_default() {
+        let r1 = Rect::default();
+        let r2 = Rect::new(5, 15, 5, 15);
+        let combined = r1.combine(&r2);
+
+        assert_eq!(combined.min_x, 5);
+        assert_eq!(combined.max_x, 15);
+        assert_eq!(combined.min_y, 5);
+        assert_eq!(combined.max_y, 15);
+    }
+
+    #[test]
     fn test_is_overlapping() {
         let r1 = Rect::new(0, 10, 0, 10);
         let r2 = Rect::new(5, 15, 5, 15);

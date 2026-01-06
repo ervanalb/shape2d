@@ -90,15 +90,16 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         for (edge_idx, edge_info) in edge_info.iter_mut().enumerate() {
             let edge_idx = edge_idx as u32;
 
-            // Calculate bounding box
+            // Calculate bounding box and hilbert value
             let bbox = V::edge_bbox(
                 &vertices[edge_info.start as usize],
                 &vertices[edge_info.end as usize],
                 &extents,
             );
-
-            // Calculate hilbert value
             let hilbert_value = bbox.hilbert_value();
+
+            edge_info.bbox = bbox;
+            edge_info.hilbert_value = hilbert_value;
 
             // Add to hilbert_to_edges
             hilbert_to_edges.insert((hilbert_value, edge_idx));
@@ -204,10 +205,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
 
     /// Run the cleaning algorithm
     fn clean(&mut self) {
-        while let Some(&dirty_edge_idx) = self.dirty_set.iter().next() {
-            // Remove from dirty set first
-            self.dirty_set.remove(&dirty_edge_idx);
-
+        while let Some(dirty_edge_idx) = self.dirty_set.pop_first() {
             // Get edge info
             let dirty_info = &self.edge_info[dirty_edge_idx as usize];
 
