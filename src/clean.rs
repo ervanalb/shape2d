@@ -1,5 +1,5 @@
 use crate::rtree::RTree;
-use crate::{Rect, Vertex};
+use crate::{Geometry, Rect};
 use std::collections::{BTreeMap, BTreeSet};
 
 type EdgeIndex = u32;
@@ -242,10 +242,30 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
 
                     // Test 2: Check for vertex on edge
                     let edge_vertex_pairs = [
-                        (candidate_idx, dirty_info.start, candidate_info.start, candidate_info.end),
-                        (candidate_idx, dirty_info.end, candidate_info.start, candidate_info.end),
-                        (dirty_edge_idx, candidate_info.start, dirty_info.start, dirty_info.end),
-                        (dirty_edge_idx, candidate_info.end, dirty_info.start, dirty_info.end),
+                        (
+                            candidate_idx,
+                            dirty_info.start,
+                            candidate_info.start,
+                            candidate_info.end,
+                        ),
+                        (
+                            candidate_idx,
+                            dirty_info.end,
+                            candidate_info.start,
+                            candidate_info.end,
+                        ),
+                        (
+                            dirty_edge_idx,
+                            candidate_info.start,
+                            dirty_info.start,
+                            dirty_info.end,
+                        ),
+                        (
+                            dirty_edge_idx,
+                            candidate_info.end,
+                            dirty_info.start,
+                            dirty_info.end,
+                        ),
                     ];
 
                     for (edge, vertex_idx, edge_start, edge_end) in edge_vertex_pairs {
