@@ -1,8 +1,6 @@
 use crate::Vertex;
 use std::cmp::Ordering;
 
-type VertexIndex = u32;
-
 /// Event type in the sweep line algorithm
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum EventType {

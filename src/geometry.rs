@@ -7,8 +7,14 @@ pub trait Geometry {
     type Extents;
     type Intersection;
 
+    const MIN_EDGE: Self::Edge;
+    const MAX_EDGE: Self::Edge;
+
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
+
+    /// Check if two edges are coincident (fully overlap)
+    fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> bool;
 
     /// Check if this vertex lies on the edge from edge_start to edge_end
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool;
@@ -18,6 +24,10 @@ pub trait Geometry {
 
     /// Merge two vertices, returning the merged result
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex;
+
+    /// Merge two edges, returning the merged result
+    /// These edges must already share all of their vertices
+    fn merged_edge(&mut self, a: Self::Edge, b: Self::Edge) -> Self::Edge;
 
     /// Creates and returns the vertex for an intersection
     fn intersection_vertex(&mut self, intersection: Self::Intersection) -> Self::Vertex;
@@ -74,12 +84,20 @@ impl<V: Copy> Iterator for FewVertices<V> {
     }
 }
 
-struct MyGeometry {
+pub struct MyGeometry {
     vertices: Vec<[f32; 2]>,
 }
 
 impl MyGeometry {
     const EPSILON: f32 = 1e-5;
+
+    pub fn new(vertices: Vec<[f32; 2]>) -> Self {
+        Self { vertices }
+    }
+
+    pub fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
 
     fn v(&self, i: u32) -> [f32; 2] {
         self.vertices[i as usize]
@@ -98,8 +116,17 @@ impl Geometry for MyGeometry {
     type Extents = ExtentsF32;
     type Intersection = [f32; 2];
 
+    const MIN_EDGE: (u32, u32) = (u32::MIN, u32::MIN);
+    const MAX_EDGE: (u32, u32) = (u32::MAX, u32::MAX);
+
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         points_coincident_f32(self.v(a), self.v(b), Self::EPSILON)
+    }
+
+    fn edges_coincident(&self, _a: Self::Edge, _b: Self::Edge) -> bool {
+        // Line segments will never be coincident unless they share endpoints,
+        // in which case they will simply be equal
+        false
     }
 
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool {
@@ -112,6 +139,11 @@ impl Geometry for MyGeometry {
     }
 
     fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Intersection> {
+        if a.0 == b.0 || a.0 == b.1 || a.1 == b.0 || a.1 == b.1 {
+            // Segments that share an endpoint don't intersect
+            return None;
+        }
+
         Some(intersect_segments_f32(
             self.v(a.0),
             self.v(a.1),
@@ -127,6 +159,10 @@ impl Geometry for MyGeometry {
 
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {
         self.push_vertex(merge_points_f32(self.v(a), self.v(b)))
+    }
+
+    fn merged_edge(&mut self, _a: Self::Edge, _b: Self::Edge) -> Self::Edge {
+        panic!("Not possible to merge line segments");
     }
 
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
