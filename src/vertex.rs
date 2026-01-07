@@ -1,7 +1,8 @@
 use crate::Rect;
+use std::cmp::Ordering;
 use std::ops::{Add, Div, Mul, Neg, Sub};
 
-/// Trait that vertex types must implement to be used with the clean algorithm
+/// Trait that vertex types must implement to be used with the clean/clip algorithm
 pub trait Vertex: Clone {
     type Extents: Default;
 
@@ -30,6 +31,16 @@ pub trait Vertex: Clone {
 
     /// Compute the axis-aligned bounding box of an edge
     fn edge_bbox(edge_start: &Self, edge_end: &Self, extents: &Self::Extents) -> Rect;
+
+    /// Compare vertices in sweep line order (first by X, then by Y)
+    fn sweep_line_cmp(&self, other: &Self) -> Ordering;
+
+    /// Compare the angular order of two vectors from self to a and self to b.
+    /// Returns the sign of the cross product: (a - self) x (b - self).
+    /// Greater = b is counterclockwise from a (positive cross product)
+    /// Equal = collinear (zero cross product)
+    /// Less = b is clockwise from a (negative cross product)
+    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering;
 }
 
 /// Trait for epsilon-based geometric operations on [T; 2] vertices
@@ -66,6 +77,16 @@ pub trait Epsilon: Copy {
         edge_end: &[Self; 2],
         extents: &Self::Extents,
     ) -> Rect;
+
+    /// Compare vertices in sweep line order (first by X, then by Y)
+    fn sweep_line_cmp(a: &[Self; 2], b: &[Self; 2]) -> Ordering;
+
+    /// Compare the angular order of two vectors from origin to a and origin to b.
+    /// Returns the sign of the cross product: (a - origin) x (b - origin).
+    /// Greater = b is counterclockwise from a (positive cross product)
+    /// Equal = collinear (zero cross product)
+    /// Less = b is clockwise from a (negative cross product)
+    fn sin_cmp(origin: &[Self; 2], a: &[Self; 2], b: &[Self; 2]) -> Ordering;
 }
 
 trait MapToU16<T> {
@@ -157,6 +178,23 @@ impl<T: Float> MapToU16<T> for FloatExtents<T> {
 
 impl<T: Float> Epsilon for T {
     type Extents = FloatExtents<T>;
+
+    fn sweep_line_cmp(a: &[T; 2], b: &[T; 2]) -> Ordering {
+        a[0].partial_cmp(&b[0])
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a[1].partial_cmp(&b[1]).unwrap_or(Ordering::Equal))
+    }
+
+    fn sin_cmp(origin: &[T; 2], a: &[T; 2], b: &[T; 2]) -> Ordering {
+        // Compute cross product: (a - origin) x (b - origin)
+        let ax = a[0] - origin[0];
+        let ay = a[1] - origin[1];
+        let bx = b[0] - origin[0];
+        let by = b[1] - origin[1];
+        let cross = ax * by - ay * bx;
+
+        cross.partial_cmp(&T::zero()).unwrap_or(Ordering::Equal)
+    }
 
     fn is_coincident(self, a: &[T; 2], b: &[T; 2]) -> bool {
         let dx = a[0] - b[0];
@@ -327,6 +365,14 @@ impl Vertex for VertexF32 {
     fn edge_bbox(edge_start: &Self, edge_end: &Self, extents: &Self::Extents) -> Rect {
         DEFAULT_EPSILON_F32.edge_bbox(edge_start, edge_end, extents)
     }
+
+    fn sweep_line_cmp(&self, other: &Self) -> Ordering {
+        f32::sweep_line_cmp(self, other)
+    }
+
+    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering {
+        f32::sin_cmp(self, a, b)
+    }
 }
 
 impl Vertex for VertexF64 {
@@ -362,6 +408,14 @@ impl Vertex for VertexF64 {
 
     fn edge_bbox(edge_start: &Self, edge_end: &Self, extents: &Self::Extents) -> Rect {
         DEFAULT_EPSILON_F64.edge_bbox(edge_start, edge_end, extents)
+    }
+
+    fn sweep_line_cmp(&self, other: &Self) -> Ordering {
+        f64::sweep_line_cmp(self, other)
+    }
+
+    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering {
+        f64::sin_cmp(self, a, b)
     }
 }
 
@@ -646,5 +700,34 @@ mod tests {
         let bbox2 = <[f32; 2]>::edge_bbox(&start2, &end2, &extents);
 
         assert!(!bbox1.overlaps(&bbox2));
+    }
+
+    #[test]
+    fn test_sweep_line_cmp() {
+        // X takes precedence over Y
+        let a = [0.0_f32, 1.0];
+        let b = [1.0, 0.0];
+        assert_eq!(a.sweep_line_cmp(&b), Ordering::Less);
+
+        // Y is compared when X is equal
+        let c = [0.5_f32, 0.0];
+        let d = [0.5, 1.0];
+        assert_eq!(c.sweep_line_cmp(&d), Ordering::Less);
+    }
+
+    #[test]
+    fn test_sin_cmp() {
+        let origin = [0.0_f32, 0.0];
+        let right = [1.0, 0.0];
+        let up = [0.0, 1.0];
+        let diagonal = [1.0, 1.0];
+        let diagonal2 = [2.0, 2.0];
+
+        // Counterclockwise ordering
+        assert_eq!(origin.sin_cmp(&right, &up), Ordering::Greater);
+        assert_eq!(origin.sin_cmp(&up, &right), Ordering::Less);
+
+        // Collinear points
+        assert_eq!(origin.sin_cmp(&diagonal, &diagonal2), Ordering::Equal);
     }
 }
