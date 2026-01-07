@@ -2,9 +2,10 @@ use crate::Rect;
 use std::cmp::Ordering;
 
 pub trait Geometry {
-    type Vertex: Copy;
-    type Edge: Copy;
+    type Vertex: Copy + Ord;
+    type Edge: Copy + Ord;
     type Extents;
+    type Intersection;
 
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
@@ -12,18 +13,21 @@ pub trait Geometry {
     /// Check if this vertex lies on the edge from edge_start to edge_end
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool;
 
-    /// Compute the intersection point of two edges, if they intersect
-    fn intersection_vertex(&mut self, a: Self::Edge, b: Self::Edge) -> Option<Self::Vertex>;
+    /// See if two edges intersect
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Intersection>;
 
     /// Merge two vertices, returning the merged result
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex;
+
+    /// Creates and returns the vertex for an intersection
+    fn intersection_vertex(&mut self, intersection: Self::Intersection) -> Self::Vertex;
 
     /// Generate an "extents" object from a list of edges,
     /// which is used when calculating the edge_bbox
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents;
 
     /// Compute the axis-aligned bounding box of an edge
-    fn edge_bbox(&self, extents: &Self::Extents, edge: Self::Edge) -> Rect;
+    fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect;
 
     /// Compare vertices in sweep line order (first by X, then by Y)
     fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering;
@@ -34,6 +38,40 @@ pub trait Geometry {
     /// Equal = collinear (zero cross product)
     /// Less = b is clockwise from a (negative cross product)
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering;
+
+    // Returns the vertices which are endpoints for this edge
+    fn vertices_for_edge(&self, edge: Self::Edge) -> FewVertices<Self::Vertex>;
+
+    // Replaces instances of old_v with new_v in edge
+    fn replace_vertex_in_edge(
+        &self,
+        edge: &mut Self::Edge,
+        old_v: Self::Vertex,
+        new_v: Self::Vertex,
+    );
+
+    // Splits an edge at the given vertex, returning two new edges
+    fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge);
+}
+
+pub enum FewVertices<V> {
+    Zero,
+    One(V),
+    Two(V, V),
+}
+
+impl<V: Copy> Iterator for FewVertices<V> {
+    type Item = V;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (result, next) = match self {
+            Self::Zero => (None, Self::Zero),
+            Self::One(a) => (Some(*a), Self::Zero),
+            Self::Two(a, b) => (Some(*a), Self::One(*b)),
+        };
+        *self = next;
+        result
+    }
 }
 
 struct MyGeometry {
@@ -58,6 +96,7 @@ impl Geometry for MyGeometry {
     type Vertex = u32;
     type Edge = (u32, u32);
     type Extents = ExtentsF32;
+    type Intersection = [f32; 2];
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         points_coincident_f32(self.v(a), self.v(b), Self::EPSILON)
@@ -72,14 +111,18 @@ impl Geometry for MyGeometry {
         )
     }
 
-    fn intersection_vertex(&mut self, a: Self::Edge, b: Self::Edge) -> Option<Self::Vertex> {
-        Some(self.push_vertex(intersect_segments_f32(
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Intersection> {
+        Some(intersect_segments_f32(
             self.v(a.0),
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
             Self::EPSILON,
-        )?))
+        )?)
+    }
+
+    fn intersection_vertex(&mut self, intersection: Self::Intersection) -> Self::Vertex {
+        self.push_vertex(intersection)
     }
 
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {
@@ -93,7 +136,7 @@ impl Geometry for MyGeometry {
         )
     }
 
-    fn edge_bbox(&self, extents: &Self::Extents, edge: Self::Edge) -> Rect {
+    fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect {
         segment_bbox_f32(self.v(edge.0), self.v(edge.1), *extents, Self::EPSILON)
     }
 
@@ -103,6 +146,32 @@ impl Geometry for MyGeometry {
 
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {
         sin_cmp_f32(self.v(common), self.v(a), self.v(b))
+    }
+
+    fn vertices_for_edge(&self, edge: Self::Edge) -> FewVertices<Self::Vertex> {
+        if edge.0 == edge.1 {
+            FewVertices::One(edge.0)
+        } else {
+            FewVertices::Two(edge.0, edge.1)
+        }
+    }
+
+    fn replace_vertex_in_edge(
+        &self,
+        edge: &mut Self::Edge,
+        old_v: Self::Vertex,
+        new_v: Self::Vertex,
+    ) {
+        if edge.0 == old_v {
+            edge.0 = new_v;
+        }
+        if edge.1 == old_v {
+            edge.1 = new_v;
+        }
+    }
+
+    fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {
+        ((edge.0, vertex), (vertex, edge.1))
     }
 }
 

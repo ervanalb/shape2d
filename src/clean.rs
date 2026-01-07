@@ -2,9 +2,6 @@ use crate::rtree::RTree;
 use crate::{Geometry, Rect};
 use std::collections::{BTreeMap, BTreeSet};
 
-type EdgeIndex = u32;
-type VertexIndex = u32;
-
 /// Flag indicating whether an edge is known to be clean or might be dirty
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirtyFlag {
@@ -16,48 +13,41 @@ pub enum DirtyFlag {
 
 /// Information about an edge
 #[derive(Debug, Clone)]
-struct EdgeInfo {
-    start: VertexIndex,
-    end: VertexIndex,
+struct EdgeInfo<G: Geometry> {
+    edge: G::Edge,
     hilbert_value: u32,
     bbox: Rect,
 }
 
 /// Actions that can be taken during the cleaning process
 #[derive(Debug)]
-enum Action<V: Vertex> {
+enum Action<G: Geometry> {
     /// Merge two coincident vertices
-    MergeVertices { v1: VertexIndex, v2: VertexIndex },
+    MergeVertices { v1: G::Vertex, v2: G::Vertex },
     /// Split an edge at a vertex
-    SplitEdge {
-        edge: EdgeIndex,
-        split_vertex: VertexIndex,
-    },
+    SplitEdge { edge: u32, split_vertex: G::Vertex },
     /// Split both edges at their intersection point
     SplitBothEdges {
-        edge_a: EdgeIndex,
-        edge_b: EdgeIndex,
-        intersection: V,
+        edge_a: u32,
+        edge_b: u32,
+        intersection: G::Intersection,
     },
 }
 
 /// Main spatial index structure
-struct SpatialIndex<'a, V: Vertex> {
-    vertices: &'a mut Vec<V>,
-    edge_info: Vec<EdgeInfo>,
-    extents: V::Extents,
-    hilbert_to_edges: BTreeSet<(u32, EdgeIndex)>,
-    vertex_to_edges: BTreeSet<(VertexIndex, EdgeIndex)>,
-    dirty_set: BTreeSet<EdgeIndex>,
+struct SpatialIndex<'a, G: Geometry> {
+    geometry: &'a mut G,
+    edge_info: Vec<EdgeInfo<G>>,
+    extents: G::Extents,
+    hilbert_to_edges: BTreeSet<(u32, u32)>,
+    vertex_to_edges: BTreeSet<(G::Vertex, u32)>,
+    dirty_set: BTreeSet<u32>,
     r_tree: RTree,
 }
 
-impl<'a, V: Vertex> SpatialIndex<'a, V> {
+impl<'a, G: Geometry> SpatialIndex<'a, G> {
     /// Build the spatial index from vertices and edges
-    fn new(
-        vertices: &'a mut Vec<V>,
-        edges: impl Iterator<Item = (VertexIndex, VertexIndex, DirtyFlag)>,
-    ) -> Self {
+    fn new(geometry: &'a mut G, edges: impl Iterator<Item = (G::Edge, DirtyFlag)>) -> Self {
         let mut edge_info = Vec::new();
         let mut hilbert_to_edges = BTreeSet::new();
         let mut vertex_to_edges = BTreeSet::new();
@@ -65,11 +55,10 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         let mut hilbert_to_rect: BTreeMap<u32, Rect> = BTreeMap::new();
 
         // Loop over edges to fill out our edge_info struct partially
-        for (edge_idx, (start, end, dirty_flag)) in edges.enumerate() {
+        for (edge_idx, (edge, dirty_flag)) in edges.enumerate() {
             // Store edge info
             edge_info.push(EdgeInfo {
-                start,
-                end,
+                edge,
                 hilbert_value: 0,
                 bbox: Default::default(),
             });
@@ -81,9 +70,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         }
 
         // Loop over our edges to find the extents
-        let extents = V::extents(edge_info.iter().map(|&EdgeInfo { start, end, .. }| {
-            (&vertices[start as usize], &vertices[end as usize])
-        }));
+        let extents = geometry.extents(edge_info.iter().map(|ei| ei.edge));
 
         // Now that we have the extents,
         // fill in the rest of the missing data
@@ -91,11 +78,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             let edge_idx = edge_idx as u32;
 
             // Calculate bounding box and hilbert value
-            let bbox = V::edge_bbox(
-                &vertices[edge_info.start as usize],
-                &vertices[edge_info.end as usize],
-                &extents,
-            );
+            let bbox = geometry.edge_bbox(edge_info.edge, &extents);
             let hilbert_value = bbox.hilbert_value();
 
             edge_info.bbox = bbox;
@@ -105,8 +88,9 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             hilbert_to_edges.insert((hilbert_value, edge_idx));
 
             // Add to vertex_to_edges
-            vertex_to_edges.insert((edge_info.start, edge_idx));
-            vertex_to_edges.insert((edge_info.end, edge_idx));
+            for vertex in geometry.vertices_for_edge(edge_info.edge) {
+                vertex_to_edges.insert((vertex, edge_idx));
+            }
 
             // Update hilbert_to_rect mapping
             hilbert_to_rect
@@ -119,7 +103,7 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
         let r_tree = RTree::build(hilbert_to_rect);
 
         Self {
-            vertices,
+            geometry,
             edge_info,
             extents,
             hilbert_to_edges,
@@ -130,74 +114,61 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
     }
 
     /// Insert a new edge into the spatial index
-    fn insert(&mut self, start: VertexIndex, end: VertexIndex, hilbert_value: u32) {
-        let edge_idx = self.edge_info.len() as EdgeIndex;
+    fn insert(&mut self, edge: G::Edge, hilbert_value: u32) {
+        let edge_idx = self.edge_info.len() as u32;
 
-        let bbox = V::edge_bbox(
-            &self.vertices[start as usize],
-            &self.vertices[end as usize],
-            &self.extents,
-        );
+        let bbox = self.geometry.edge_bbox(edge, &self.extents);
 
         self.edge_info.push(EdgeInfo {
-            start,
-            end,
+            edge,
             hilbert_value,
             bbox,
         });
 
         self.hilbert_to_edges.insert((hilbert_value, edge_idx));
-        self.vertex_to_edges.insert((start, edge_idx));
-        self.vertex_to_edges.insert((end, edge_idx));
+        for vertex in self.geometry.vertices_for_edge(edge) {
+            self.vertex_to_edges.insert((vertex, edge_idx));
+        }
         self.dirty_set.insert(edge_idx);
         self.r_tree.enlarge(hilbert_value, bbox);
     }
 
     /// Edit an edge's endpoints
-    fn edit(&mut self, edge_idx: EdgeIndex, new_start: VertexIndex, new_end: VertexIndex) {
-        let info = &self.edge_info[edge_idx as usize];
-        let old_start = info.start;
-        let old_end = info.end;
+    fn replace_edge(&mut self, edge_idx: u32, new_edge: G::Edge) {
+        let info = &mut self.edge_info[edge_idx as usize];
         let hilbert_value = info.hilbert_value;
 
-        // Calculate new bounding box
-        let new_bbox = V::edge_bbox(
-            &self.vertices[new_start as usize],
-            &self.vertices[new_end as usize],
-            &self.extents,
-        );
-
-        // Update edge info
-        self.edge_info[edge_idx as usize].start = new_start;
-        self.edge_info[edge_idx as usize].end = new_end;
-        self.edge_info[edge_idx as usize].bbox = new_bbox;
-
-        // Update vertex_to_edges
-        if old_start != new_start {
-            self.vertex_to_edges.remove(&(old_start, edge_idx));
-            self.vertex_to_edges.insert((new_start, edge_idx));
+        // Remove old endpoints
+        for vertex in self.geometry.vertices_for_edge(info.edge) {
+            self.vertex_to_edges.remove(&(vertex, edge_idx));
         }
-        if old_end != new_end {
-            self.vertex_to_edges.remove(&(old_end, edge_idx));
-            self.vertex_to_edges.insert((new_end, edge_idx));
+
+        info.edge = new_edge;
+
+        // Calculate new bounding box
+        info.bbox = self.geometry.edge_bbox(info.edge, &self.extents);
+
+        // Add new endpoints
+        for vertex in self.geometry.vertices_for_edge(info.edge) {
+            self.vertex_to_edges.insert((vertex, edge_idx));
         }
 
         // Mark as dirty
         self.dirty_set.insert(edge_idx);
 
         // Enlarge R-tree
-        self.r_tree.enlarge(hilbert_value, new_bbox);
+        self.r_tree.enlarge(hilbert_value, info.bbox);
     }
 
     /// Get all edges that reference a given vertex
-    fn edges_for_vertex(&self, vertex_idx: VertexIndex) -> impl Iterator<Item = EdgeIndex> + '_ {
+    fn edges_for_vertex(&self, vertex: G::Vertex) -> impl Iterator<Item = u32> + '_ {
         self.vertex_to_edges
-            .range((vertex_idx, 0)..=(vertex_idx, u32::MAX))
+            .range((vertex, 0)..=(vertex, u32::MAX))
             .map(|(_, edge_idx)| *edge_idx)
     }
 
     /// Get all edges with a given hilbert value
-    fn edges_for_hilbert(&self, hilbert_value: u32) -> impl Iterator<Item = EdgeIndex> + '_ {
+    fn edges_for_hilbert(&self, hilbert_value: u32) -> impl Iterator<Item = u32> + '_ {
         self.hilbert_to_edges
             .range((hilbert_value, 0)..=(hilbert_value, u32::MAX))
             .map(|(_, edge_idx)| *edge_idx)
@@ -209,100 +180,82 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             // Get edge info
             let dirty_info = &self.edge_info[dirty_edge_idx as usize];
 
-            let mut action: Option<Action<V>> = None;
-
-            // Iterate over all potentially intersecting edges
-            'itest: for hilbert_value in self.r_tree.search(&dirty_info.bbox) {
-                for candidate_idx in self.edges_for_hilbert(hilbert_value) {
-                    let candidate_info = self.edge_info[candidate_idx as usize].clone();
-
-                    // Get vertices
-                    let dirty_vertices = (dirty_info.start, dirty_info.end);
-                    let candidate_vertices = (candidate_info.start, candidate_info.end);
-
-                    // Test 1: Check for coincident vertices
-                    // Check all 6 pairs: (a.0, a.1],(a.0, b.0],(a.0, b.1],(a.1, b.0],(a.1, b.1],(b.0, b.1)
-                    let pairs = [
-                        (dirty_vertices.0, dirty_vertices.1),
-                        (dirty_vertices.0, candidate_vertices.0),
-                        (dirty_vertices.0, candidate_vertices.1),
-                        (dirty_vertices.1, candidate_vertices.0),
-                        (dirty_vertices.1, candidate_vertices.1),
-                        (candidate_vertices.0, candidate_vertices.1),
-                    ];
-
-                    for (v1, v2) in pairs {
-                        if v1 != v2
-                            && self.vertices[v1 as usize].is_coincident(&self.vertices[v2 as usize])
-                        {
+            let mut action: Option<Action<G>> = None;
+            'itest: {
+                // Test 1: Check for coincident vertices within this edge
+                for v1 in self.geometry.vertices_for_edge(dirty_info.edge) {
+                    for v2 in self.geometry.vertices_for_edge(dirty_info.edge) {
+                        if v1 != v2 && self.geometry.vertices_coincident(v1, v2) {
                             action = Some(Action::MergeVertices { v1, v2 });
                             break 'itest;
                         }
                     }
+                }
 
-                    // Test 2: Check for vertex on edge
-                    let edge_vertex_pairs = [
-                        (
-                            candidate_idx,
-                            dirty_info.start,
-                            candidate_info.start,
-                            candidate_info.end,
-                        ),
-                        (
-                            candidate_idx,
-                            dirty_info.end,
-                            candidate_info.start,
-                            candidate_info.end,
-                        ),
-                        (
-                            dirty_edge_idx,
-                            candidate_info.start,
-                            dirty_info.start,
-                            dirty_info.end,
-                        ),
-                        (
-                            dirty_edge_idx,
-                            candidate_info.end,
-                            dirty_info.start,
-                            dirty_info.end,
-                        ),
-                    ];
+                // Iterate over all potentially intersecting edges
+                for hilbert_value in self.r_tree.search(&dirty_info.bbox) {
+                    for candidate_idx in self.edges_for_hilbert(hilbert_value) {
+                        let candidate_info = &self.edge_info[candidate_idx as usize];
 
-                    for (edge, vertex_idx, edge_start, edge_end) in edge_vertex_pairs {
-                        if vertex_idx != edge_start
-                            && vertex_idx != edge_end
-                            && self.vertices[vertex_idx as usize].is_on_edge(
-                                &self.vertices[edge_start as usize],
-                                &self.vertices[edge_end as usize],
-                            )
+                        // Test 2: Check for coincident vertices
+                        for v1 in self.geometry.vertices_for_edge(dirty_info.edge) {
+                            for v2 in self.geometry.vertices_for_edge(candidate_info.edge) {
+                                if v1 != v2 && self.geometry.vertices_coincident(v1, v2) {
+                                    {
+                                        action = Some(Action::MergeVertices { v1, v2 });
+                                        break 'itest;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Test 3: Check for vertex on edge
+                        'v_on_e: for vertex in self.geometry.vertices_for_edge(dirty_info.edge) {
+                            for v2 in self.geometry.vertices_for_edge(candidate_info.edge) {
+                                if vertex == v2 {
+                                    // Don't do vertex-on-edge test
+                                    // if this vertex is already an endpoint of the edge
+                                    continue 'v_on_e;
+                                }
+                            }
+                            if self.geometry.vertex_on_edge(vertex, candidate_info.edge) {
+                                action = Some(Action::SplitEdge {
+                                    edge: candidate_idx,
+                                    split_vertex: vertex,
+                                });
+                                break 'itest;
+                            }
+                        }
+                        'v_on_e: for vertex in self.geometry.vertices_for_edge(candidate_info.edge)
                         {
-                            action = Some(Action::SplitEdge {
-                                edge,
-                                split_vertex: vertex_idx,
+                            for v2 in self.geometry.vertices_for_edge(dirty_info.edge) {
+                                if vertex == v2 {
+                                    // Don't do vertex-on-edge test
+                                    // if this vertex is already an endpoint of the edge
+                                    continue 'v_on_e;
+                                }
+                            }
+                            if self.geometry.vertex_on_edge(vertex, dirty_info.edge) {
+                                action = Some(Action::SplitEdge {
+                                    edge: dirty_edge_idx,
+                                    split_vertex: vertex,
+                                });
+                                break 'itest;
+                            }
+                        }
+
+                        // Test 4: Check for edge intersection
+                        if let Some(intersection) = self
+                            .geometry
+                            .intersection(dirty_info.edge, candidate_info.edge)
+                        {
+                            action = Some(Action::SplitBothEdges {
+                                edge_a: dirty_edge_idx,
+                                edge_b: candidate_idx,
+                                intersection,
                             });
                             break 'itest;
                         }
-                    }
-
-                    // Test 3: Check for edge intersection
-                    // Skip if edges share a vertex (they can't intersect in the middle)
-                    if dirty_info.start != candidate_info.start
-                        && dirty_info.start != candidate_info.end
-                        && dirty_info.end != candidate_info.start
-                        && dirty_info.end != candidate_info.end
-                        && let Some(intersection) = V::from_intersection(
-                            &self.vertices[dirty_info.start as usize],
-                            &self.vertices[dirty_info.end as usize],
-                            &self.vertices[candidate_info.start as usize],
-                            &self.vertices[candidate_info.end as usize],
-                        )
-                    {
-                        action = Some(Action::SplitBothEdges {
-                            edge_a: dirty_edge_idx,
-                            edge_b: candidate_idx,
-                            intersection,
-                        });
-                        break 'itest;
                     }
                 }
             }
@@ -311,71 +264,59 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
             match action {
                 Some(Action::MergeVertices { v1, v2 }) => {
                     // Add merged vertex as a new vertex
-                    let merged_vertex =
-                        self.vertices[v1 as usize].merged_with(&self.vertices[v2 as usize]);
-                    let new_v = self.vertices.len() as VertexIndex;
-                    self.vertices.push(merged_vertex);
+                    let merged_vertex = self.geometry.merged_vertex(v1, v2);
 
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
                         while let Some(edge_idx) = { self.edges_for_vertex(v).next() } {
-                            let EdgeInfo {
-                                mut start, mut end, ..
-                            } = self.edge_info[edge_idx as usize];
-                            if start == v {
-                                start = new_v;
-                            }
-                            if end == v {
-                                end = new_v;
-                            }
-                            self.edit(edge_idx, start, end);
+                            let mut new_edge = self.edge_info[edge_idx as usize].edge;
+                            self.geometry
+                                .replace_vertex_in_edge(&mut new_edge, v1, merged_vertex);
+                            self.geometry
+                                .replace_vertex_in_edge(&mut new_edge, v2, merged_vertex);
+                            self.replace_edge(edge_idx, new_edge);
                         }
                     }
                 }
-                Some(Action::SplitEdge { edge, split_vertex }) => {
+                Some(Action::SplitEdge {
+                    edge: edge_idx,
+                    split_vertex,
+                }) => {
                     let EdgeInfo {
-                        start,
-                        end: old_end,
+                        edge,
                         hilbert_value,
                         ..
-                    } = self.edge_info[edge as usize];
+                    } = self.edge_info[edge_idx as usize];
 
-                    // Shorten the original edge
-                    self.edit(edge, start, split_vertex);
+                    let (new_e1, new_e2) = self.geometry.split_edge(edge, split_vertex);
 
-                    // Create new edge from split point to old endpoint
-                    self.insert(split_vertex, old_end, hilbert_value);
+                    self.replace_edge(edge_idx, new_e1);
+                    self.insert(new_e2, hilbert_value);
                 }
                 Some(Action::SplitBothEdges {
-                    edge_a,
-                    edge_b,
+                    edge_a: edge_a_idx,
+                    edge_b: edge_b_idx,
                     intersection,
                 }) => {
-                    // Add intersection point as a new vertex
-                    let new_vertex_idx = self.vertices.len() as VertexIndex;
-                    self.vertices.push(intersection);
-
-                    // Get edge info before modifying edges
                     let EdgeInfo {
-                        start: edge_a_start,
-                        end: edge_a_end,
+                        edge: edge_a,
                         hilbert_value: edge_a_hilbert,
                         ..
-                    } = self.edge_info[edge_a as usize];
+                    } = self.edge_info[edge_a_idx as usize];
                     let EdgeInfo {
-                        start: edge_b_start,
-                        end: edge_b_end,
+                        edge: edge_b,
                         hilbert_value: edge_b_hilbert,
                         ..
-                    } = self.edge_info[edge_b as usize];
+                    } = self.edge_info[edge_b_idx as usize];
 
-                    // Shorten both edges to intersection point
-                    self.edit(edge_a, edge_a_start, new_vertex_idx);
-                    self.edit(edge_b, edge_b_start, new_vertex_idx);
+                    let vertex = self.geometry.intersection_vertex(intersection);
+                    let (edge_a1, edge_a2) = self.geometry.split_edge(edge_a, vertex);
+                    let (edge_b1, edge_b2) = self.geometry.split_edge(edge_b, vertex);
 
-                    // Create new edges from intersection to old endpoints
-                    self.insert(new_vertex_idx, edge_a_end, edge_a_hilbert);
-                    self.insert(new_vertex_idx, edge_b_end, edge_b_hilbert);
+                    self.replace_edge(edge_a_idx, edge_a1);
+                    self.replace_edge(edge_b_idx, edge_b1);
+                    self.insert(edge_a2, edge_a_hilbert);
+                    self.insert(edge_b2, edge_b_hilbert);
                 }
                 None => {}
             }
@@ -383,36 +324,30 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
     }
 
     /// Extract the final clean edge list
-    fn extract_edges(&self) -> Vec<(u32, u32)> {
+    fn extract_edges(&self) -> Vec<G::Edge> {
         self.hilbert_to_edges
             .iter()
             .map(|(_, edge_idx)| {
                 let info = &self.edge_info[*edge_idx as usize];
-                (info.start, info.end)
+                info.edge
             })
             .collect()
     }
 }
 
 /// Partial clean: clean edges with mixed dirty/clean flags
-pub fn partial_clean<V: Vertex>(
-    vertices: &mut Vec<V>,
-    edges: impl Iterator<Item = (VertexIndex, VertexIndex, DirtyFlag)>,
-) -> Vec<(u32, u32)> {
-    let mut spatial_index = SpatialIndex::new(vertices, edges);
+pub fn partial_clean<G: Geometry>(
+    geometry: &mut G,
+    edges: impl Iterator<Item = (G::Edge, DirtyFlag)>,
+) -> Vec<G::Edge> {
+    let mut spatial_index = SpatialIndex::new(geometry, edges);
     spatial_index.clean();
     spatial_index.extract_edges()
 }
 
 /// Full clean: clean all edges (assumes all dirty)
-pub fn clean<V: Vertex>(
-    vertices: &mut Vec<V>,
-    edges: impl Iterator<Item = (VertexIndex, VertexIndex)>,
-) -> Vec<(u32, u32)> {
-    partial_clean(
-        vertices,
-        edges.map(|(start, end)| (start, end, DirtyFlag::Dirty)),
-    )
+pub fn clean<G: Geometry>(geometry: &mut G, edges: impl Iterator<Item = G::Edge>) -> Vec<G::Edge> {
+    partial_clean(geometry, edges.map(|edge| (edge, DirtyFlag::Dirty)))
 }
 
 #[cfg(test)]
