@@ -1,12 +1,9 @@
 /// Axis-aligned bounding rectangle with u16 coordinates
 /// Inclusive on all bounds
-// TODO: convert this into two fields, min: [u16; 2], max: [u16; 2]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rect {
-    pub min_x: u16,
-    pub max_x: u16,
-    pub min_y: u16,
-    pub max_y: u16,
+    pub min: [u16; 2],
+    pub max: [u16; 2],
 }
 
 impl Default for Rect {
@@ -15,55 +12,47 @@ impl Default for Rect {
     /// it will yield that rect back.
     fn default() -> Self {
         Self {
-            min_x: u16::MAX,
-            max_x: 0,
-            min_y: u16::MAX,
-            max_y: 0,
+            min: [u16::MAX, u16::MAX],
+            max: [0, 0],
         }
     }
 }
 
 impl Rect {
-    /// Create a new rectangle
-    pub fn new(min_x: u16, max_x: u16, min_y: u16, max_y: u16) -> Self {
-        Self {
-            min_x,
-            max_x,
-            min_y,
-            max_y,
-        }
-    }
-
     /// Combine this rectangle with another, returning the smallest rectangle
     /// that bounds both
     pub fn combine(&self, other: &Self) -> Self {
         Self {
-            min_x: self.min_x.min(other.min_x),
-            max_x: self.max_x.max(other.max_x),
-            min_y: self.min_y.min(other.min_y),
-            max_y: self.max_y.max(other.max_y),
+            min: [
+                self.min[0].min(other.min[0]),
+                self.min[1].min(other.min[1]),
+            ],
+            max: [
+                self.max[0].max(other.max[0]),
+                self.max[1].max(other.max[1]),
+            ],
         }
     }
 
     /// Check if two rectangles overlap (including touching on any side or corner)
     /// Returns false if either rect is invalid (max < min)
     pub fn overlaps(&self, other: &Self) -> bool {
-        self.min_x <= self.max_x
-            && self.min_y <= self.max_y
-            && other.min_x <= other.max_x
-            && other.min_y <= other.max_y
-            && self.min_x <= other.max_x
-            && self.max_x >= other.min_x
-            && self.min_y <= other.max_y
-            && self.max_y >= other.min_y
+        self.min[0] <= self.max[0]
+            && self.min[1] <= self.max[1]
+            && other.min[0] <= other.max[0]
+            && other.min[1] <= other.max[1]
+            && self.min[0] <= other.max[0]
+            && self.max[0] >= other.min[0]
+            && self.min[1] <= other.max[1]
+            && self.max[1] >= other.min[1]
     }
 
     /// Compute the Hilbert curve value for the center point of this rectangle
     /// u16his is slightly lossy as it maps (u32, u32) -> u32
     pub fn hilbert_value(&self) -> u32 {
         // Calculate center point, being careful about overflow
-        let center_x = ((self.min_x as u32 + self.max_x as u32) / 2) as u16;
-        let center_y = ((self.min_y as u32 + self.max_y as u32) / 2) as u16;
+        let center_x = ((self.min[0] as u32 + self.max[0] as u32) / 2) as u16;
+        let center_y = ((self.min[1] as u32 + self.max[1] as u32) / 2) as u16;
         crate::hilbert::xy_to_hilbert(center_x, center_y)
     }
 }
@@ -74,33 +63,29 @@ mod tests {
 
     #[test]
     fn test_combine() {
-        let r1 = Rect::new(0, 10, 0, 10);
-        let r2 = Rect::new(5, 15, 5, 15);
+        let r1 = Rect { min: [0, 0], max: [10, 10] };
+        let r2 = Rect { min: [5, 5], max: [15, 15] };
         let combined = r1.combine(&r2);
 
-        assert_eq!(combined.min_x, 0);
-        assert_eq!(combined.max_x, 15);
-        assert_eq!(combined.min_y, 0);
-        assert_eq!(combined.max_y, 15);
+        assert_eq!(combined.min, [0, 0]);
+        assert_eq!(combined.max, [15, 15]);
     }
 
     #[test]
     fn test_combine_with_default() {
         let r1 = Rect::default();
-        let r2 = Rect::new(5, 15, 5, 15);
+        let r2 = Rect { min: [5, 5], max: [15, 15] };
         let combined = r1.combine(&r2);
 
-        assert_eq!(combined.min_x, 5);
-        assert_eq!(combined.max_x, 15);
-        assert_eq!(combined.min_y, 5);
-        assert_eq!(combined.max_y, 15);
+        assert_eq!(combined.min, [5, 5]);
+        assert_eq!(combined.max, [15, 15]);
     }
 
     #[test]
     fn test_is_overlapping() {
-        let r1 = Rect::new(0, 10, 0, 10);
-        let r2 = Rect::new(5, 15, 5, 15);
-        let r3 = Rect::new(20, 30, 20, 30);
+        let r1 = Rect { min: [0, 0], max: [10, 10] };
+        let r2 = Rect { min: [5, 5], max: [15, 15] };
+        let r3 = Rect { min: [20, 20], max: [30, 30] };
 
         assert!(r1.overlaps(&r2));
         assert!(r2.overlaps(&r1));
@@ -110,8 +95,8 @@ mod tests {
 
     #[test]
     fn test_overlapping_touching() {
-        let r1 = Rect::new(0, 10, 0, 10);
-        let r2 = Rect::new(10, 20, 0, 10); // u16ouching on right edge
+        let r1 = Rect { min: [0, 0], max: [10, 10] };
+        let r2 = Rect { min: [10, 0], max: [20, 10] }; // Touching on right edge
 
         assert!(r1.overlaps(&r2));
         assert!(r2.overlaps(&r1));
@@ -119,8 +104,8 @@ mod tests {
 
     #[test]
     fn test_overlapping_corner() {
-        let r1 = Rect::new(0, 10, 0, 10);
-        let r2 = Rect::new(10, 20, 10, 20); // u16ouching at corner
+        let r1 = Rect { min: [0, 0], max: [10, 10] };
+        let r2 = Rect { min: [10, 10], max: [20, 20] }; // Touching at corner
 
         assert!(r1.overlaps(&r2));
         assert!(r2.overlaps(&r1));

@@ -241,36 +241,23 @@ impl<'a, V: Vertex> SpatialIndex<'a, V> {
                     }
 
                     // Test 2: Check for vertex on edge
-                    // TODO: Combine these two loops into a single `for` loop over pairs of (edge, vertex)
-                    // TODO: like for vertices above.
-                    // Check if either endpoint of dirty_edge lies on candidate_edge
-                    for &vertex_idx in &[dirty_info.start, dirty_info.end] {
-                        if vertex_idx != candidate_info.start
-                            && vertex_idx != candidate_info.end
-                            && self.vertices[vertex_idx as usize].is_on_edge(
-                                &self.vertices[candidate_info.start as usize],
-                                &self.vertices[candidate_info.end as usize],
-                            )
-                        {
-                            action = Some(Action::SplitEdge {
-                                edge: candidate_idx,
-                                split_vertex: vertex_idx,
-                            });
-                            break 'itest;
-                        }
-                    }
+                    let edge_vertex_pairs = [
+                        (candidate_idx, dirty_info.start, candidate_info.start, candidate_info.end),
+                        (candidate_idx, dirty_info.end, candidate_info.start, candidate_info.end),
+                        (dirty_edge_idx, candidate_info.start, dirty_info.start, dirty_info.end),
+                        (dirty_edge_idx, candidate_info.end, dirty_info.start, dirty_info.end),
+                    ];
 
-                    // Check if either endpoint of candidate_edge lies on dirty_edge
-                    for &vertex_idx in &[candidate_info.start, candidate_info.end] {
-                        if vertex_idx != dirty_info.start
-                            && vertex_idx != dirty_info.end
+                    for (edge, vertex_idx, edge_start, edge_end) in edge_vertex_pairs {
+                        if vertex_idx != edge_start
+                            && vertex_idx != edge_end
                             && self.vertices[vertex_idx as usize].is_on_edge(
-                                &self.vertices[dirty_info.start as usize],
-                                &self.vertices[dirty_info.end as usize],
+                                &self.vertices[edge_start as usize],
+                                &self.vertices[edge_end as usize],
                             )
                         {
                             action = Some(Action::SplitEdge {
-                                edge: dirty_edge_idx,
+                                edge,
                                 split_vertex: vertex_idx,
                             });
                             break 'itest;
@@ -494,109 +481,48 @@ mod tests {
         assert_eq!(vertices.len(), 5);
     }
 
-    // Integration tests using [f32; 2] vertex type
-    mod f32_array_tests {
-        use super::*;
+    #[test]
+    fn test_multiple_intersections() {
+        let mut vertices = vec![
+            // Horizontal line
+            [0.0, 0.5],
+            [1.0, 0.5],
+            // Vertical line
+            [0.5, 0.0],
+            [0.5, 1.0],
+            // Diagonal line
+            [0.0, 0.0],
+            [1.0, 1.0],
+        ];
 
-        #[test]
-        fn test_f32_simple_square() {
-            let mut vertices = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let edges = [(0, 1), (2, 3), (4, 5)];
 
-            let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
+        let result = clean(&mut vertices, edges.into_iter());
+        // Each of the 3 edges should be split at their intersections
+        // Horizontal and vertical intersect at [0.5, 0.5]
+        // Diagonal intersects both at [0.5, 0.5]
+        // So all three meet at one point, creating 6 edges
+        assert_eq!(result.len(), 6);
+    }
 
-            let result = clean(&mut vertices, edges.into_iter());
-            assert_eq!(result.len(), 4);
-            assert_eq!(vertices.len(), 4);
-        }
+    #[test]
+    fn test_complex_polygon() {
+        // Star-like pattern
+        let mut vertices = vec![
+            [0.5, 0.0], // Top
+            [0.7, 0.5], // Right
+            [0.5, 1.0], // Bottom
+            [0.3, 0.5], // Left
+            [0.5, 0.5], // Center
+        ];
 
-        #[test]
-        fn test_f32_intersecting_diagonals() {
-            let mut vertices = vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]];
+        let edges = [
+            (0, 2), // Vertical through center
+            (1, 3), // Horizontal through center
+        ];
 
-            let edges = [(0, 1), (2, 3)];
-
-            let result = clean(&mut vertices, edges.into_iter());
-            assert_eq!(result.len(), 4);
-            assert_eq!(vertices.len(), 5);
-
-            // Check that intersection point is at [0.5, 0.5]
-            let intersection = vertices[4];
-            assert!(intersection.is_coincident(&[0.5, 0.5]));
-        }
-
-        #[test]
-        fn test_f32_coincident_vertices() {
-            let mut vertices = vec![
-                [0.0, 0.0],
-                [1.0, 0.0],
-                [0.000001, 0.000001], // Very close to [0.0, 0.0]
-                [1.0, 1.0],
-            ];
-
-            let edges = [(0, 1), (2, 3)];
-
-            let result = clean(&mut vertices, edges.into_iter());
-            assert_eq!(result.len(), 2);
-        }
-
-        #[test]
-        fn test_f32_t_junction() {
-            let mut vertices = vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]];
-
-            let edges = [(0, 1), (2, 3)];
-
-            let result = clean(&mut vertices, edges.into_iter());
-            assert_eq!(result.len(), 4);
-            assert_eq!(vertices.len(), 5);
-
-            // Check intersection point
-            let intersection = vertices[4];
-            assert!(intersection.is_coincident(&[0.5, 0.5]));
-        }
-
-        #[test]
-        fn test_f32_multiple_intersections() {
-            let mut vertices = vec![
-                // Horizontal line
-                [0.0, 0.5],
-                [1.0, 0.5],
-                // Vertical line
-                [0.5, 0.0],
-                [0.5, 1.0],
-                // Diagonal line
-                [0.0, 0.0],
-                [1.0, 1.0],
-            ];
-
-            let edges = [(0, 1), (2, 3), (4, 5)];
-
-            let result = clean(&mut vertices, edges.into_iter());
-            // Each of the 3 edges should be split at their intersections
-            // Horizontal and vertical intersect at [0.5, 0.5]
-            // Diagonal intersects both at [0.5, 0.5]
-            // So all three meet at one point, creating 6 edges
-            assert_eq!(result.len(), 6);
-        }
-
-        #[test]
-        fn test_f32_complex_polygon() {
-            // Star-like pattern
-            let mut vertices = vec![
-                [0.5, 0.0], // Top
-                [0.7, 0.5], // Right
-                [0.5, 1.0], // Bottom
-                [0.3, 0.5], // Left
-                [0.5, 0.5], // Center
-            ];
-
-            let edges = [
-                (0, 2), // Vertical through center
-                (1, 3), // Horizontal through center
-            ];
-
-            let result = clean(&mut vertices, edges.into_iter());
-            // Both edges pass through center, should be split there
-            assert_eq!(result.len(), 4);
-        }
+        let result = clean(&mut vertices, edges.into_iter());
+        // Both edges pass through center, should be split there
+        assert_eq!(result.len(), 4);
     }
 }

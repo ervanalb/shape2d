@@ -277,12 +277,7 @@ impl<T: Float> Epsilon for T {
         let min = extents.map(min);
         let max = extents.map(max);
 
-        Rect {
-            min_x: min[0],
-            max_x: max[0],
-            min_y: min[1],
-            max_y: max[1],
-        }
+        Rect { min, max }
     }
 }
 
@@ -580,8 +575,8 @@ mod tests {
         let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
-        assert!(bbox.min_x < bbox.max_x);
-        assert!(bbox.min_y <= bbox.max_y);
+        assert!(bbox.min[0] < bbox.max[0]);
+        assert!(bbox.min[1] <= bbox.max[1]);
         assert!(bbox.overlaps(&bbox));
     }
 
@@ -592,8 +587,8 @@ mod tests {
         let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
-        assert!(bbox.min_x <= bbox.max_x);
-        assert!(bbox.min_y < bbox.max_y);
+        assert!(bbox.min[0] <= bbox.max[0]);
+        assert!(bbox.min[1] < bbox.max[1]);
         assert!(bbox.overlaps(&bbox));
     }
 
@@ -604,8 +599,8 @@ mod tests {
         let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
-        assert!(bbox.min_x < bbox.max_x);
-        assert!(bbox.min_y < bbox.max_y);
+        assert!(bbox.min[0] < bbox.max[0]);
+        assert!(bbox.min[1] < bbox.max[1]);
         assert!(bbox.overlaps(&bbox));
     }
 
@@ -616,8 +611,8 @@ mod tests {
         let extents = <[f32; 2]>::extents([(&[0., 0.], &[1., 1.])].into_iter());
         let bbox = <[f32; 2]>::edge_bbox(&start, &end, &extents);
 
-        assert!(bbox.min_x <= bbox.max_x);
-        assert!(bbox.min_y <= bbox.max_y);
+        assert!(bbox.min[0] <= bbox.max[0]);
+        assert!(bbox.min[1] <= bbox.max[1]);
         assert!(bbox.overlaps(&bbox));
     }
 

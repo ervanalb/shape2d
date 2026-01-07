@@ -112,7 +112,7 @@ impl RTree {
 
         let mut combined_bbox = bbox;
 
-        while idx > 0 {
+        loop {
             // Combine with existing bbox
             let bbox = &mut self.nodes[idx].bbox;
             combined_bbox = bbox.combine(&combined_bbox);
@@ -122,6 +122,11 @@ impl RTree {
             }
 
             *bbox = combined_bbox;
+
+            // Stop if we are at the root
+            if idx == 0 {
+                break;
+            }
 
             // Propagate changes up the tree
             idx = Self::parent_idx(idx);
@@ -223,9 +228,9 @@ mod tests {
     #[test]
     fn test_rtree_build() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect::new(0, 10, 0, 10));
-        map.insert(20, Rect::new(10, 20, 10, 20));
-        map.insert(30, Rect::new(20, 30, 20, 30));
+        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
+        map.insert(20, Rect { min: [10, 10], max: [20, 20] });
+        map.insert(30, Rect { min: [20, 20], max: [30, 30] });
 
         let tree = RTree::build(map);
 
@@ -236,14 +241,14 @@ mod tests {
     #[test]
     fn test_rtree_search() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect::new(0, 10, 0, 10));
-        map.insert(20, Rect::new(10, 20, 10, 20));
-        map.insert(30, Rect::new(20, 30, 20, 30));
+        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
+        map.insert(20, Rect { min: [10, 10], max: [20, 20] });
+        map.insert(30, Rect { min: [20, 20], max: [30, 30] });
 
         let tree = RTree::build(map);
 
         // Search for rect that overlaps first two
-        let test_rect = Rect::new(5, 15, 5, 15);
+        let test_rect = Rect { min: [5, 5], max: [15, 15] };
         let results: Vec<u32> = tree.search(&test_rect).collect();
 
         assert!(results.len() == 2);
@@ -254,20 +259,32 @@ mod tests {
     #[test]
     fn test_rtree_enlarge() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect::new(0, 10, 0, 10));
+        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
+        let test_rect_a = Rect { min: [5, 5], max: [8, 8] };
+        let test_rect_b = Rect { min: [16, 16], max: [17, 17] };
 
         let mut tree = RTree::build(map);
 
-        let changed = tree.enlarge(10, Rect::new(0, 20, 0, 20));
-        //assert!(changed);
-        // TODO: since changed has been removed,
-        // TODO: instead, we should run a search on the tree
-        // TODO: to ensure that the given hilbert value was enlarged.
+        // Check that rect A is found
+        let results: Vec<u32> = tree.search(&test_rect_a).collect();
+        assert_eq!(results, vec![10]);
 
-        // Enlarge with same rect should not change anything
-        let changed = tree.enlarge(10, Rect::new(0, 15, 0, 15));
-        //assert!(!changed);
-        // TODO: same as above
+        // Check that rect B is NOT found
+        let results: Vec<u32> = tree.search(&test_rect_b).collect();
+        assert_eq!(results, vec![]);
+
+        // Enlarge the bounding box
+        tree.enlarge(10, Rect { min: [15, 15], max: [20, 20] });
+
+        // Check that rect A is found
+        let results: Vec<u32> = tree.search(&test_rect_a).collect();
+        assert_eq!(results, vec![10]);
+
+        dbg!(&tree);
+
+        // Check that rect B is found
+        let results: Vec<u32> = tree.search(&test_rect_b).collect();
+        assert_eq!(results, vec![10]);
     }
 
     #[test]
@@ -277,7 +294,7 @@ mod tests {
 
         assert_eq!(tree.nodes.len(), 0);
 
-        let test_rect = Rect::new(0, 10, 0, 10);
+        let test_rect = Rect { min: [0, 0], max: [10, 10] };
         let results: Vec<u32> = tree.search(&test_rect).collect();
         assert_eq!(results.len(), 0);
     }
