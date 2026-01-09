@@ -1,5 +1,57 @@
-use crate::Rect;
 use std::collections::BTreeMap;
+
+/// Axis-aligned bounding rectangle with u16 coordinates
+/// Inclusive on all bounds
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Rect {
+    pub min: [u16; 2],
+    pub max: [u16; 2],
+}
+
+impl Default for Rect {
+    /// This default value is an invalid rect
+    /// that is designed so that when combined with any valid rect,
+    /// it will yield that rect back.
+    fn default() -> Self {
+        Self {
+            min: [u16::MAX, u16::MAX],
+            max: [0, 0],
+        }
+    }
+}
+
+impl Rect {
+    /// Combine this rectangle with another, returning the smallest rectangle
+    /// that bounds both
+    pub fn combine(&self, other: &Self) -> Self {
+        Self {
+            min: [self.min[0].min(other.min[0]), self.min[1].min(other.min[1])],
+            max: [self.max[0].max(other.max[0]), self.max[1].max(other.max[1])],
+        }
+    }
+
+    /// Check if two rectangles overlap (including touching on any side or corner)
+    /// Returns false if either rect is invalid (max < min)
+    pub fn overlaps(&self, other: &Self) -> bool {
+        self.min[0] <= self.max[0]
+            && self.min[1] <= self.max[1]
+            && other.min[0] <= other.max[0]
+            && other.min[1] <= other.max[1]
+            && self.min[0] <= other.max[0]
+            && self.max[0] >= other.min[0]
+            && self.min[1] <= other.max[1]
+            && self.max[1] >= other.min[1]
+    }
+
+    /// Compute the Hilbert curve value for the center point of this rectangle
+    /// u16his is slightly lossy as it maps (u32, u32) -> u32
+    pub fn hilbert_value(&self) -> u32 {
+        // Calculate center point, being careful about overflow
+        let center_x = ((self.min[0] as u32 + self.max[0] as u32) / 2) as u16;
+        let center_y = ((self.min[1] as u32 + self.max[1] as u32) / 2) as u16;
+        crate::hilbert::xy_to_hilbert(center_x, center_y)
+    }
+}
 
 /// A node in the packed R-tree array
 #[derive(Debug, Clone, Default)]
@@ -221,16 +273,185 @@ impl<'a> Iterator for RTreeSearchIterator<'a> {
     }
 }
 
+/// Convert (x, y) coordinates to a Hilbert curve index
+/// Input coordinates are u16 values, output is u32
+// TODO(Eric): See if this can be replaced with clever bit fiddling
+pub fn xy_to_hilbert(x: u16, y: u16) -> u32 {
+    let mut x = x as u32;
+    let mut y = y as u32;
+    let mut d = 0u32;
+    let n = 65536u32; // 2^16 for u16 coordinates
+
+    /// Rotate/flip a quadrant appropriately
+    fn rotate(n: u32, x: &mut u32, y: &mut u32, rx: bool, ry: bool) {
+        if !ry {
+            if rx {
+                *x = n.saturating_sub(1).saturating_sub(*x);
+                *y = n.saturating_sub(1).saturating_sub(*y);
+            }
+
+            // Swap x and y
+            std::mem::swap(x, y);
+        }
+    }
+
+    // Process from most significant bit to least
+    let mut s = n / 2;
+    while s > 0 {
+        let rx = (x & s) != 0;
+        let ry = (y & s) != 0;
+
+        d += s * s * ((3 * (rx as u32)) ^ (ry as u32));
+
+        // Rotate coordinates
+        rotate(n, &mut x, &mut y, rx, ry);
+
+        s /= 2;
+    }
+
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
+    fn test_hilbert_corners() {
+        // Test the four corners of the space
+        let h00 = xy_to_hilbert(0, 0);
+        let h01 = xy_to_hilbert(0, u16::MAX);
+        let h10 = xy_to_hilbert(u16::MAX, 0);
+        let h11 = xy_to_hilbert(u16::MAX, u16::MAX);
+
+        // All should be different
+        assert_ne!(h00, h01);
+        assert_ne!(h00, h10);
+        assert_ne!(h00, h11);
+        assert_ne!(h01, h10);
+        assert_ne!(h01, h11);
+        assert_ne!(h10, h11);
+    }
+
+    #[test]
+    fn test_hilbert_locality() {
+        // Points that are close in 2D space should have similar Hilbert values
+        let h1 = xy_to_hilbert(1000, 1000);
+        let h2 = xy_to_hilbert(1001, 1000);
+        let h3 = xy_to_hilbert(1000, 1001);
+        let h_far = xy_to_hilbert(50000, 50000);
+
+        // Nearby points should be closer in Hilbert space than far points
+        let diff_near = h1.abs_diff(h2).min(h1.abs_diff(h3));
+        let diff_far = h1.abs_diff(h_far);
+
+        assert!(diff_near < diff_far);
+    }
+
+    #[test]
+    fn test_combine() {
+        let r1 = Rect {
+            min: [0, 0],
+            max: [10, 10],
+        };
+        let r2 = Rect {
+            min: [5, 5],
+            max: [15, 15],
+        };
+        let combined = r1.combine(&r2);
+
+        assert_eq!(combined.min, [0, 0]);
+        assert_eq!(combined.max, [15, 15]);
+    }
+
+    #[test]
+    fn test_combine_with_default() {
+        let r1 = Rect::default();
+        let r2 = Rect {
+            min: [5, 5],
+            max: [15, 15],
+        };
+        let combined = r1.combine(&r2);
+
+        assert_eq!(combined.min, [5, 5]);
+        assert_eq!(combined.max, [15, 15]);
+    }
+
+    #[test]
+    fn test_is_overlapping() {
+        let r1 = Rect {
+            min: [0, 0],
+            max: [10, 10],
+        };
+        let r2 = Rect {
+            min: [5, 5],
+            max: [15, 15],
+        };
+        let r3 = Rect {
+            min: [20, 20],
+            max: [30, 30],
+        };
+
+        assert!(r1.overlaps(&r2));
+        assert!(r2.overlaps(&r1));
+        assert!(!r1.overlaps(&r3));
+        assert!(!r3.overlaps(&r1));
+    }
+
+    #[test]
+    fn test_overlapping_touching() {
+        let r1 = Rect {
+            min: [0, 0],
+            max: [10, 10],
+        };
+        let r2 = Rect {
+            min: [10, 0],
+            max: [20, 10],
+        }; // Touching on right edge
+
+        assert!(r1.overlaps(&r2));
+        assert!(r2.overlaps(&r1));
+    }
+
+    #[test]
+    fn test_overlapping_corner() {
+        let r1 = Rect {
+            min: [0, 0],
+            max: [10, 10],
+        };
+        let r2 = Rect {
+            min: [10, 10],
+            max: [20, 20],
+        }; // Touching at corner
+
+        assert!(r1.overlaps(&r2));
+        assert!(r2.overlaps(&r1));
+    }
+
+    #[test]
     fn test_rtree_build() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
-        map.insert(20, Rect { min: [10, 10], max: [20, 20] });
-        map.insert(30, Rect { min: [20, 20], max: [30, 30] });
+        map.insert(
+            10,
+            Rect {
+                min: [0, 0],
+                max: [10, 10],
+            },
+        );
+        map.insert(
+            20,
+            Rect {
+                min: [10, 10],
+                max: [20, 20],
+            },
+        );
+        map.insert(
+            30,
+            Rect {
+                min: [20, 20],
+                max: [30, 30],
+            },
+        );
 
         let tree = RTree::build(map);
 
@@ -241,14 +462,35 @@ mod tests {
     #[test]
     fn test_rtree_search() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
-        map.insert(20, Rect { min: [10, 10], max: [20, 20] });
-        map.insert(30, Rect { min: [20, 20], max: [30, 30] });
+        map.insert(
+            10,
+            Rect {
+                min: [0, 0],
+                max: [10, 10],
+            },
+        );
+        map.insert(
+            20,
+            Rect {
+                min: [10, 10],
+                max: [20, 20],
+            },
+        );
+        map.insert(
+            30,
+            Rect {
+                min: [20, 20],
+                max: [30, 30],
+            },
+        );
 
         let tree = RTree::build(map);
 
         // Search for rect that overlaps first two
-        let test_rect = Rect { min: [5, 5], max: [15, 15] };
+        let test_rect = Rect {
+            min: [5, 5],
+            max: [15, 15],
+        };
         let results: Vec<u32> = tree.search(&test_rect).collect();
 
         assert!(results.len() == 2);
@@ -259,9 +501,21 @@ mod tests {
     #[test]
     fn test_rtree_enlarge() {
         let mut map = BTreeMap::new();
-        map.insert(10, Rect { min: [0, 0], max: [10, 10] });
-        let test_rect_a = Rect { min: [5, 5], max: [8, 8] };
-        let test_rect_b = Rect { min: [16, 16], max: [17, 17] };
+        map.insert(
+            10,
+            Rect {
+                min: [0, 0],
+                max: [10, 10],
+            },
+        );
+        let test_rect_a = Rect {
+            min: [5, 5],
+            max: [8, 8],
+        };
+        let test_rect_b = Rect {
+            min: [16, 16],
+            max: [17, 17],
+        };
 
         let mut tree = RTree::build(map);
 
@@ -274,7 +528,13 @@ mod tests {
         assert_eq!(results, vec![]);
 
         // Enlarge the bounding box
-        tree.enlarge(10, Rect { min: [15, 15], max: [20, 20] });
+        tree.enlarge(
+            10,
+            Rect {
+                min: [15, 15],
+                max: [20, 20],
+            },
+        );
 
         // Check that rect A is found
         let results: Vec<u32> = tree.search(&test_rect_a).collect();
@@ -294,7 +554,10 @@ mod tests {
 
         assert_eq!(tree.nodes.len(), 0);
 
-        let test_rect = Rect { min: [0, 0], max: [10, 10] };
+        let test_rect = Rect {
+            min: [0, 0],
+            max: [10, 10],
+        };
         let results: Vec<u32> = tree.search(&test_rect).collect();
         assert_eq!(results.len(), 0);
     }

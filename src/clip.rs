@@ -1,9 +1,9 @@
-use crate::{Edge, Geometry, SweepLineEvent, SweepLineEventType};
-
 use std::{
     cmp::Ordering,
     collections::{BTreeMap, btree_map::Entry},
 };
+
+use crate::kernel::{Edge, Kernel, SweepLineEvent, SweepLineEventType};
 
 /// Edge direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -14,11 +14,11 @@ enum Direction {
 
 /// An entry in the status structure
 #[derive(Debug, Clone)]
-struct StatusEntry<G: Geometry> {
+struct StatusEntry<K: Kernel> {
     /// The active edge
-    edge: G::Edge,
+    edge: K::Edge,
     /// The active segment
-    segment: G::SweepLineEdgeSegment,
+    segment: K::SweepLineEdgeSegment,
     /// The winding number above this segment
     winding_above: i32,
 }
@@ -34,11 +34,11 @@ struct StatusEntry<G: Geometry> {
 ///
 /// # Returns
 /// A list of edges wound positively around the "inside" area
-pub fn clip<G: Geometry>(
-    geometry: &mut G,
-    edges: impl Iterator<Item = G::Edge>,
+pub fn clip<K: Kernel>(
+    geometry: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
     winding_rule: impl Fn(i32) -> bool,
-) -> Vec<G::Edge> {
+) -> Vec<K::Edge> {
     // Build sorted event queue
     let events = build_event_queue(geometry, edges);
 
@@ -47,10 +47,10 @@ pub fn clip<G: Geometry>(
 }
 
 /// Build the event queue from edges
-fn build_event_queue<G: Geometry>(
-    geometry: &mut G,
-    edges: impl Iterator<Item = G::Edge>,
-) -> Vec<SweepLineEvent<G>> {
+fn build_event_queue<K: Kernel>(
+    geometry: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
+) -> Vec<SweepLineEvent<K>> {
     let mut events = Vec::new();
 
     for e in edges {
@@ -65,13 +65,13 @@ fn build_event_queue<G: Geometry>(
 }
 
 /// Run the sweep line algorithm
-fn sweep_line<G: Geometry>(
-    geometry: &mut G,
-    events: Vec<SweepLineEvent<G>>,
+fn sweep_line<K: Kernel>(
+    geometry: &mut K,
+    events: Vec<SweepLineEvent<K>>,
     winding_rule: impl Fn(i32) -> bool,
-) -> Vec<G::Edge> {
-    let mut status: Vec<StatusEntry<G>> = Vec::new();
-    let mut output: BTreeMap<G::Edge, Option<Direction>> = BTreeMap::new();
+) -> Vec<K::Edge> {
+    let mut status: Vec<StatusEntry<K>> = Vec::new();
+    let mut output: BTreeMap<K::Edge, Option<Direction>> = BTreeMap::new();
 
     for event in events.iter() {
         match event.event_type {
@@ -195,16 +195,16 @@ fn sweep_line<G: Geometry>(
 mod tests {
     use super::*;
     use crate::clean;
-    use crate::geometry::MyGeometry;
+    use crate::kernel::polyline::F32 as Kernel;
 
     #[test]
     fn test_simple_square() {
         // Simple square
-        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Positive winding rule
-        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
 
         // All edges should be in the output
         assert_eq!(result.len(), 4);
@@ -213,17 +213,17 @@ mod tests {
     #[test]
     fn test_empty_input() {
         // No edges
-        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0]]);
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0]]);
         let edges: Vec<(u32, u32)> = vec![];
 
-        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_overlapping_squares() {
         // Two overlapping squares that should be merged
-        let mut geometry = MyGeometry::new(vec![
+        let mut kernel = Kernel::new(vec![
             // First square
             [0.0, 0.0],
             [1.0, 0.0],
@@ -248,14 +248,14 @@ mod tests {
         ];
 
         // Clean the edges first to handle intersections
-        let cleaned_edges = clean(&mut geometry, edges.iter().copied());
+        let cleaned_edges = clean(&mut kernel, edges.iter().copied());
         assert!(cleaned_edges.len() == 12);
 
-        let union = clip(&mut geometry, cleaned_edges.iter().copied(), |w| w > 0);
+        let union = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 0);
         // 4 edges lie on the interior and should have been clipped
         assert!(union.len() == 8);
 
-        let intersection = clip(&mut geometry, cleaned_edges.iter().copied(), |w| w > 1);
+        let intersection = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 1);
         // Intersection is a square
         assert!(intersection.len() == 4);
     }
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn test_square_with_hole() {
         // Outer square and inner square (hole)
-        let mut geometry = MyGeometry::new(vec![
+        let mut kernel = Kernel::new(vec![
             // Outer square
             [0.0, 0.0],
             [2.0, 0.0],
@@ -289,23 +289,23 @@ mod tests {
             (7, 4),
         ];
 
-        // Positive winding rule shouldn't change geometry
-        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
+        // Positive winding rule shouldn't change kernel
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
         assert_eq!(result.len(), 8);
 
-        // Non-positive winding rule also shouldn't change geometry
-        let result = clip(&mut geometry, edges.iter().copied(), |w| w <= 0);
+        // Non-positive winding rule also shouldn't change kernel
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w <= 0);
         assert_eq!(result.len(), 8);
     }
 
     #[test]
     fn test_empty_output() {
         // Square with winding number that will be filtered out
-        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Rule that filters out everything
-        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 1);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 1);
         assert_eq!(result.len(), 0);
     }
 }
