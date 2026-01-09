@@ -1,4 +1,4 @@
-use crate::{Geometry, SweepLineEvent, SweepLineEventType};
+use crate::{Edge, Geometry, SweepLineEvent, SweepLineEventType};
 
 use std::{
     cmp::Ordering,
@@ -50,7 +50,7 @@ pub fn clip<G: Geometry>(
 fn build_event_queue<G: Geometry>(
     geometry: &mut G,
     edges: impl Iterator<Item = G::Edge>,
-) -> Vec<SweepLineEvent<G::Edge, G::SweepLineEdgeSegment>> {
+) -> Vec<SweepLineEvent<G>> {
     let mut events = Vec::new();
 
     for e in edges {
@@ -67,7 +67,7 @@ fn build_event_queue<G: Geometry>(
 /// Run the sweep line algorithm
 fn sweep_line<G: Geometry>(
     geometry: &mut G,
-    events: Vec<SweepLineEvent<G::Edge, G::SweepLineEdgeSegment>>,
+    events: Vec<SweepLineEvent<G>>,
     winding_rule: impl Fn(i32) -> bool,
 ) -> Vec<G::Edge> {
     let mut status: Vec<StatusEntry<G>> = Vec::new();
@@ -185,7 +185,7 @@ fn sweep_line<G: Geometry>(
         .iter()
         .filter_map(|(&edge, dir)| match dir {
             Some(Direction::Forward) => Some(edge),
-            Some(Direction::Reverse) => Some(geometry.reverse_edge(edge)),
+            Some(Direction::Reverse) => Some(edge.reversed()),
             None => None,
         })
         .collect()
@@ -195,15 +195,16 @@ fn sweep_line<G: Geometry>(
 mod tests {
     use super::*;
     use crate::clean;
+    use crate::geometry::MyGeometry;
 
     #[test]
     fn test_simple_square() {
         // Simple square
-        let vertices = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Positive winding rule
-        let result = clip(&vertices, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
 
         // All edges should be in the output
         assert_eq!(result.len(), 4);
@@ -212,17 +213,17 @@ mod tests {
     #[test]
     fn test_empty_input() {
         // No edges
-        let vertices: Vec<[f32; 2]> = vec![[0.0, 0.0], [1.0, 0.0]];
+        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0]]);
         let edges: Vec<(u32, u32)> = vec![];
 
-        let result = clip(&vertices, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
         assert_eq!(result.len(), 0);
     }
 
     #[test]
     fn test_overlapping_squares() {
         // Two overlapping squares that should be merged
-        let mut vertices = vec![
+        let mut geometry = MyGeometry::new(vec![
             // First square
             [0.0, 0.0],
             [1.0, 0.0],
@@ -233,7 +234,7 @@ mod tests {
             [1.5, 0.5],
             [1.5, 1.5],
             [0.5, 1.5],
-        ];
+        ]);
 
         let edges = vec![
             (0, 1),
@@ -247,14 +248,14 @@ mod tests {
         ];
 
         // Clean the edges first to handle intersections
-        let cleaned_edges = clean(&mut vertices, edges.iter().copied());
+        let cleaned_edges = clean(&mut geometry, edges.iter().copied());
         assert!(cleaned_edges.len() == 12);
 
-        let union = clip(&vertices, cleaned_edges.iter().copied(), |w| w > 0);
+        let union = clip(&mut geometry, cleaned_edges.iter().copied(), |w| w > 0);
         // 4 edges lie on the interior and should have been clipped
         assert!(union.len() == 8);
 
-        let intersection = clip(&vertices, cleaned_edges.iter().copied(), |w| w > 1);
+        let intersection = clip(&mut geometry, cleaned_edges.iter().copied(), |w| w > 1);
         // Intersection is a square
         assert!(intersection.len() == 4);
     }
@@ -262,7 +263,7 @@ mod tests {
     #[test]
     fn test_square_with_hole() {
         // Outer square and inner square (hole)
-        let vertices = vec![
+        let mut geometry = MyGeometry::new(vec![
             // Outer square
             [0.0, 0.0],
             [2.0, 0.0],
@@ -273,7 +274,7 @@ mod tests {
             [0.5, 1.5],
             [1.5, 1.5],
             [1.5, 0.5],
-        ];
+        ]);
 
         let edges = vec![
             // Outer square (counter-clockwise)
@@ -289,22 +290,22 @@ mod tests {
         ];
 
         // Positive winding rule shouldn't change geometry
-        let result = clip(&vertices, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 0);
         assert_eq!(result.len(), 8);
 
         // Non-positive winding rule also shouldn't change geometry
-        let result = clip(&vertices, edges.iter().copied(), |w| w <= 0);
+        let result = clip(&mut geometry, edges.iter().copied(), |w| w <= 0);
         assert_eq!(result.len(), 8);
     }
 
     #[test]
     fn test_empty_output() {
         // Square with winding number that will be filtered out
-        let vertices = vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Rule that filters out everything
-        let result = clip(&vertices, edges.iter().copied(), |w| w > 1);
+        let result = clip(&mut geometry, edges.iter().copied(), |w| w > 1);
         assert_eq!(result.len(), 0);
     }
 }

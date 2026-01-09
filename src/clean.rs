@@ -1,5 +1,5 @@
 use crate::rtree::RTree;
-use crate::{Geometry, Rect};
+use crate::{Edge, Geometry, Rect};
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter;
@@ -158,14 +158,14 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
     /// Get all edges that reference a given vertex
     fn edges_for_vertex(&self, vertex: G::Vertex) -> impl Iterator<Item = G::Edge> + '_ {
         self.vertex_to_edges
-            .range((vertex, G::MIN_EDGE)..=(vertex, G::MAX_EDGE))
+            .range((vertex, G::Edge::MIN)..=(vertex, G::Edge::MAX))
             .map(|&(_, e)| e)
     }
 
     /// Get all edges with a given hilbert value
     fn edges_for_hilbert(&self, hilbert_value: u32) -> impl Iterator<Item = G::Edge> + '_ {
         self.hilbert_to_edges
-            .range((hilbert_value, G::MIN_EDGE)..=(hilbert_value, G::MAX_EDGE))
+            .range((hilbert_value, G::Edge::MIN)..=(hilbert_value, G::Edge::MAX))
             .map(|&(_, e)| e)
     }
 
@@ -196,7 +196,7 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
                         }
 
                         // Test 2: Check if these edges cancel
-                        if self.geometry.edges_cancel(dirty_edge, candidate_edge) {
+                        if dirty_edge.reversed() == candidate_edge {
                             action = Some(Action::CancelEdges {
                                 e1: dirty_edge,
                                 e2: candidate_edge,

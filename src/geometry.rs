@@ -1,27 +1,19 @@
 use crate::Rect;
 use std::cmp::Ordering;
 
-pub trait Geometry {
+pub trait Geometry: Sized {
     type Vertex: Copy + Ord;
-    type Edge: Copy + Ord;
+    type Edge: Edge;
     type Extents;
     type Intersection;
     type SweepLineEdgeSegment: Copy + PartialEq;
     type SweepLineEventPoint;
-
-    const MIN_EDGE: Self::Edge;
-    const MAX_EDGE: Self::Edge;
 
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
 
     /// Check if two edges are coincident (fully overlap)
     fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> bool;
-
-    /// Check if two edges exactly cancel each other out
-    /// (this is an "equality" check, not a "coincidence" check,
-    /// i.e. should be equivalent to a.reversed() == b)
-    fn edges_cancel(&self, a: Self::Edge, b: Self::Edge) -> bool;
 
     /// Check if this vertex lies on the edge from edge_start to edge_end
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool;
@@ -73,18 +65,11 @@ pub trait Geometry {
     fn sweep_line_events_for_edge(
         &self,
         edge: Self::Edge,
-    ) -> impl Iterator<Item = SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>>;
+    ) -> impl Iterator<Item = SweepLineEvent<Self>>;
 
-    fn sweep_line_event_cmp(
-        &self,
-        a: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-        b: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-    ) -> Ordering;
+    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering;
 
-    fn sweep_line_event_point(
-        &self,
-        event: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-    ) -> Self::SweepLineEventPoint;
+    fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint;
 
     fn sweep_line_segment_cmp(
         &self,
@@ -98,8 +83,13 @@ pub trait Geometry {
         edge: Self::Edge,
         segment: Self::SweepLineEdgeSegment,
     ) -> i32;
+}
 
-    fn reverse_edge(&self, edge: Self::Edge) -> Self::Edge;
+pub trait Edge: Copy + Ord {
+    const MIN: Self;
+    const MAX: Self;
+
+    fn reversed(self) -> Self;
 }
 
 pub enum FewVertices<V> {
@@ -126,13 +116,13 @@ impl SweepLineEventType {
 
 /// An event in the sweep line algorithm
 #[derive(Debug, Clone)]
-pub struct SweepLineEvent<Edge, SweepLineEdgeSegment> {
+pub struct SweepLineEvent<G: Geometry> {
     /// The type of event (start or end)
     pub event_type: SweepLineEventType,
     /// The edge containing this segment
-    pub edge: Edge,
+    pub edge: G::Edge,
     /// The vertex index where this event occurs
-    pub segment: SweepLineEdgeSegment,
+    pub segment: G::SweepLineEdgeSegment,
 }
 
 impl<V: Copy> Iterator for FewVertices<V> {
@@ -181,6 +171,15 @@ impl MyGeometry {
     }
 }
 
+impl Edge for (u32, u32) {
+    const MIN: Self = (u32::MIN, u32::MIN);
+    const MAX: Self = (u32::MAX, u32::MAX);
+
+    fn reversed(self) -> Self {
+        (self.1, self.0)
+    }
+}
+
 impl Geometry for MyGeometry {
     type Vertex = u32;
     type Edge = (u32, u32);
@@ -188,9 +187,6 @@ impl Geometry for MyGeometry {
     type Intersection = [f32; 2];
     type SweepLineEdgeSegment = SweepLineEdgeType;
     type SweepLineEventPoint = [f32; 2];
-
-    const MIN_EDGE: (u32, u32) = (u32::MIN, u32::MIN);
-    const MAX_EDGE: (u32, u32) = (u32::MAX, u32::MAX);
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         points_coincident_f32(self.v(a), self.v(b), Self::EPSILON)
@@ -200,10 +196,6 @@ impl Geometry for MyGeometry {
         // Line segments will never be coincident unless they share endpoints,
         // in which case they will simply be equal
         false
-    }
-
-    fn edges_cancel(&self, a: Self::Edge, b: Self::Edge) -> bool {
-        a.0 == b.1 && a.1 == b.0
     }
 
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool {
@@ -293,7 +285,7 @@ impl Geometry for MyGeometry {
     fn sweep_line_events_for_edge(
         &self,
         edge: Self::Edge,
-    ) -> impl Iterator<Item = SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>> {
+    ) -> impl Iterator<Item = SweepLineEvent<Self>> {
         // Edges always have exactly 2 events.
         // We will use the `segment` data to store whether this edge is bottom (going  right) or top (going left)
         // based on how its endpoints sort in sweep-line order.
@@ -320,11 +312,7 @@ impl Geometry for MyGeometry {
         .into_iter()
     }
 
-    fn sweep_line_event_cmp(
-        &self,
-        a: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-        b: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-    ) -> Ordering {
+    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering {
         let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.segment, a.edge));
         let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.segment, b.edge));
 
@@ -353,10 +341,7 @@ impl Geometry for MyGeometry {
             })
     }
 
-    fn sweep_line_event_point(
-        &self,
-        event: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
-    ) -> Self::SweepLineEventPoint {
+    fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint {
         self.v(sweep_line_select_vertex(
             event.event_type,
             event.segment,
@@ -388,10 +373,6 @@ impl Geometry for MyGeometry {
             SweepLineEdgeType::Bottom => 1,
             SweepLineEdgeType::Top => -1,
         }
-    }
-
-    fn reverse_edge(&self, edge: Self::Edge) -> Self::Edge {
-        (edge.1, edge.0)
     }
 }
 
