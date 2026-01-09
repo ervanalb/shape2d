@@ -1,4 +1,4 @@
-use crate::Vertex;
+use crate::Geometry;
 use std::cmp::Ordering;
 
 /// Event type in the sweep line algorithm
@@ -17,13 +17,13 @@ enum Direction {
 
 /// An event in the sweep line algorithm
 #[derive(Debug, Clone)]
-struct Event {
+struct Event<G: Geometry> {
     /// The type of event (start or end)
     event_type: EventType,
     /// The vertex index where this event occurs
-    vertex: VertexIndex,
+    vertex: G::Vertex,
     /// The other (non-event) vertex index
-    other_vertex: VertexIndex,
+    other_vertex: G::Vertex,
     /// The direction of the edge relative to the event vertex
     direction: Direction,
 }
@@ -59,19 +59,19 @@ struct CancellationState {
 ///
 /// # Returns
 /// A list of edges as (from_index, to_index) wound positively around the "inside" area
-pub fn clip<V: Vertex>(
-    vertices: &[V],
-    edges: impl Iterator<Item = (VertexIndex, VertexIndex)>,
+pub fn clip<G: Geometry>(
+    geometry: &mut G,
+    edges: impl Iterator<Item = G::Edge>,
     winding_rule: impl Fn(i32) -> bool,
-) -> Vec<(VertexIndex, VertexIndex)> {
+) -> Vec<G::Edge> {
     // Build event queue
-    let mut events = build_event_queue(vertices, edges);
+    let mut events = build_event_queue(geometry, edges);
 
     // Sort events
-    sort_events(vertices, &mut events);
+    sort_events(geometry, &mut events);
 
     // Cancel opposing edges (2-cycles)
-    let events = cancel_opposing_edges(events);
+    //let events = cancel_opposing_edges(events);
 
     // Run sweep line algorithm
     sweep_line(vertices, events, winding_rule)

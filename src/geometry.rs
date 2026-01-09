@@ -16,6 +16,11 @@ pub trait Geometry {
     /// Check if two edges are coincident (fully overlap)
     fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> bool;
 
+    /// Check if two edges exactly cancel each other out
+    /// (this is an "equality" check, not a "coincidence" check,
+    /// i.e. should be equivalent to a.reversed() == b)
+    fn edges_cancel(&self, a: Self::Edge, b: Self::Edge) -> bool;
+
     /// Check if this vertex lies on the edge from edge_start to edge_end
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool;
 
@@ -25,9 +30,10 @@ pub trait Geometry {
     /// Merge two vertices, returning the merged result
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex;
 
-    /// Merge two edges, returning the merged result
+    /// Merge two edges, returning the merged result.
     /// These edges must already share all of their vertices
-    fn merged_edge(&mut self, a: Self::Edge, b: Self::Edge) -> Self::Edge;
+    /// The two edges that are returned must either be equal or cancel.
+    fn merged_edges(&mut self, a: Self::Edge, b: Self::Edge) -> (Self::Edge, Self::Edge);
 
     /// Creates and returns the vertex for an intersection
     fn intersection_vertex(&mut self, intersection: Self::Intersection) -> Self::Vertex;
@@ -53,14 +59,16 @@ pub trait Geometry {
     fn vertices_for_edge(&self, edge: Self::Edge) -> FewVertices<Self::Vertex>;
 
     // Replaces instances of old_v with new_v in edge
+    // This returns None if the resultant edge is a reflex edge with zero area.
     fn replace_vertex_in_edge(
         &self,
-        edge: &mut Self::Edge,
+        edge: Self::Edge,
         old_v: Self::Vertex,
         new_v: Self::Vertex,
-    );
+    ) -> Option<Self::Edge>;
 
     // Splits an edge at the given vertex, returning two new edges
+    // `vertex` must not be equal to or coincident with an endpoint already on `edge`
     fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge);
 }
 
@@ -129,6 +137,10 @@ impl Geometry for MyGeometry {
         false
     }
 
+    fn edges_cancel(&self, a: Self::Edge, b: Self::Edge) -> bool {
+        a.0 == b.1 && a.1 == b.0
+    }
+
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool {
         point_on_segment_f32(
             self.v(vertex),
@@ -161,7 +173,7 @@ impl Geometry for MyGeometry {
         self.push_vertex(merge_points_f32(self.v(a), self.v(b)))
     }
 
-    fn merged_edge(&mut self, _a: Self::Edge, _b: Self::Edge) -> Self::Edge {
+    fn merged_edges(&mut self, _a: Self::Edge, _b: Self::Edge) -> (Self::Edge, Self::Edge) {
         panic!("Not possible to merge line segments");
     }
 
@@ -194,16 +206,23 @@ impl Geometry for MyGeometry {
 
     fn replace_vertex_in_edge(
         &self,
-        edge: &mut Self::Edge,
+        mut edge: Self::Edge,
         old_v: Self::Vertex,
         new_v: Self::Vertex,
-    ) {
+    ) -> Option<Self::Edge> {
         if edge.0 == old_v {
+            if edge.1 == new_v {
+                return None; // Reflex edge
+            }
             edge.0 = new_v;
         }
         if edge.1 == old_v {
+            if edge.0 == new_v {
+                return None; // Reflex edge
+            }
             edge.1 = new_v;
         }
+        Some(edge)
     }
 
     fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {

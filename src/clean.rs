@@ -24,6 +24,8 @@ struct EdgeInfo {
 /// Actions that can be taken during the cleaning process
 #[derive(Debug)]
 enum Action<G: Geometry> {
+    /// Cancel two opposite edges
+    CancelEdges { e1: G::Edge, e2: G::Edge },
     /// Merge two coincident vertices
     MergeVertices { v1: G::Vertex, v2: G::Vertex },
     /// Merge two coincident edges
@@ -193,16 +195,13 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
                             continue;
                         }
 
-                        // Test 2: Check for coincident vertices
-                        for v1 in self.geometry.vertices_for_edge(dirty_edge) {
-                            for v2 in self.geometry.vertices_for_edge(candidate_edge) {
-                                if v1 != v2 && self.geometry.vertices_coincident(v1, v2) {
-                                    {
-                                        action = Some(Action::MergeVertices { v1, v2 });
-                                        break 'itest;
-                                    }
-                                }
-                            }
+                        // Test 2: Check if these edges cancel
+                        if self.geometry.edges_cancel(dirty_edge, candidate_edge) {
+                            action = Some(Action::CancelEdges {
+                                e1: dirty_edge,
+                                e2: candidate_edge,
+                            });
+                            break 'itest;
                         }
 
                         // Test 3: Check if these two edges are fully coincident
@@ -214,7 +213,19 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
                             break 'itest;
                         }
 
-                        // Test 4: Check for vertex on edge
+                        // Test 4: Check for coincident vertices
+                        for v1 in self.geometry.vertices_for_edge(dirty_edge) {
+                            for v2 in self.geometry.vertices_for_edge(candidate_edge) {
+                                if v1 != v2 && self.geometry.vertices_coincident(v1, v2) {
+                                    {
+                                        action = Some(Action::MergeVertices { v1, v2 });
+                                        break 'itest;
+                                    }
+                                }
+                            }
+                        }
+
+                        // Test 5: Check for vertex on edge
                         'v_on_e: for vertex in self.geometry.vertices_for_edge(dirty_edge) {
                             for v2 in self.geometry.vertices_for_edge(candidate_edge) {
                                 if vertex == v2 {
@@ -248,7 +259,7 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
                             }
                         }
 
-                        // Test 5: Check for edge intersection
+                        // Test 6: Check for edge intersection
                         if let Some(intersection) =
                             self.geometry.intersection(dirty_edge, candidate_edge)
                         {
@@ -265,6 +276,26 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
 
             // Handle the action if one was found
             match action {
+                Some(Action::CancelEdges { e1, e2 }) => {
+                    // Remove both edges
+                    let old_1 = self.remove(e1);
+                    let old_2 = self.remove(e2);
+
+                    // See if we need to add one back due to a multiplicity imbalance
+                    if old_1.multiplicity > old_2.multiplicity {
+                        self.insert(
+                            e1,
+                            old_1.hilbert_value,
+                            old_1.multiplicity - old_2.multiplicity,
+                        );
+                    } else if old_2.multiplicity > old_1.multiplicity {
+                        self.insert(
+                            e2,
+                            old_2.hilbert_value,
+                            old_2.multiplicity - old_1.multiplicity,
+                        );
+                    }
+                }
                 Some(Action::MergeVertices { v1, v2 }) => {
                     // Add merged vertex as a new vertex
                     let merged_vertex = self.geometry.merged_vertex(v1, v2);
@@ -272,30 +303,38 @@ impl<'a, G: Geometry> SpatialIndex<'a, G> {
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
                         while let Some(edge) = { self.edges_for_vertex(v).next() } {
-                            let mut new_edge = edge;
-                            self.geometry
-                                .replace_vertex_in_edge(&mut new_edge, v1, merged_vertex);
-                            self.geometry
-                                .replace_vertex_in_edge(&mut new_edge, v2, merged_vertex);
+                            let new_edge = edge;
                             let old = self.remove(edge);
-                            self.insert(new_edge, old.hilbert_value, old.multiplicity);
+                            let new_edge =
+                                self.geometry
+                                    .replace_vertex_in_edge(new_edge, v1, merged_vertex);
+                            if let Some(new_edge) = new_edge {
+                                let new_edge = self.geometry.replace_vertex_in_edge(
+                                    new_edge,
+                                    v2,
+                                    merged_vertex,
+                                );
+                                if let Some(new_edge) = new_edge {
+                                    self.insert(new_edge, old.hilbert_value, old.multiplicity);
+                                }
+                            }
                         }
                     }
                 }
                 Some(Action::MergeEdges { e1, e2 }) => {
-                    // Construct merged edge
-                    let merged_edge = self.geometry.merged_edge(e1, e2);
+                    // Construct merged edges
+                    let (new_e1, new_e2) = self.geometry.merged_edges(e1, e2);
 
                     // Remove old edges
-                    let old_1 = self.remove(e1);
-                    let old_2 = self.remove(e2);
+                    let old_e1 = self.remove(e1);
+                    let old_e2 = self.remove(e2);
 
-                    // Insert new edge
-                    self.insert(
-                        merged_edge,
-                        old_1.hilbert_value,
-                        old_1.multiplicity + old_2.multiplicity,
-                    );
+                    // Insert new edges
+                    // (Doesn't really matter which hilbert value we use,
+                    // or even if we use different ones,
+                    // but let's put them into the same hilbert value)
+                    self.insert(new_e1, old_e1.hilbert_value, old_e1.multiplicity);
+                    self.insert(new_e2, old_e1.hilbert_value, old_e2.multiplicity);
                 }
                 Some(Action::SplitEdge { edge, split_vertex }) => {
                     let (new_e1, new_e2) = self.geometry.split_edge(edge, split_vertex);
