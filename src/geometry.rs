@@ -6,6 +6,8 @@ pub trait Geometry {
     type Edge: Copy + Ord;
     type Extents;
     type Intersection;
+    type SweepLineEdgeSegment: Copy + PartialEq;
+    type SweepLineEventPoint;
 
     const MIN_EDGE: Self::Edge;
     const MAX_EDGE: Self::Edge;
@@ -45,9 +47,6 @@ pub trait Geometry {
     /// Compute the axis-aligned bounding box of an edge
     fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect;
 
-    /// Compare vertices in sweep line order (first by X, then by Y)
-    fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering;
-
     /// Compare the angular order of two vectors from self to a and self to b.
     /// Returns the sign of the cross product: (a - self) x (b - self).
     /// Greater = b is counterclockwise from a (positive cross product)
@@ -70,12 +69,70 @@ pub trait Geometry {
     // Splits an edge at the given vertex, returning two new edges
     // `vertex` must not be equal to or coincident with an endpoint already on `edge`
     fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge);
+
+    fn sweep_line_events_for_edge(
+        &self,
+        edge: Self::Edge,
+    ) -> impl Iterator<Item = SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>>;
+
+    fn sweep_line_event_cmp(
+        &self,
+        a: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+        b: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+    ) -> Ordering;
+
+    fn sweep_line_event_point(
+        &self,
+        event: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+    ) -> Self::SweepLineEventPoint;
+
+    fn sweep_line_segment_cmp(
+        &self,
+        edge: Self::Edge,
+        segment: Self::SweepLineEdgeSegment,
+        event_point: &Self::SweepLineEventPoint,
+    ) -> Ordering;
+
+    fn sweep_line_winding_number_delta(
+        &self,
+        edge: Self::Edge,
+        segment: Self::SweepLineEdgeSegment,
+    ) -> i32;
+
+    fn reverse_edge(&self, edge: Self::Edge) -> Self::Edge;
 }
 
 pub enum FewVertices<V> {
     Zero,
     One(V),
     Two(V, V),
+}
+
+/// Event type in the sweep line algorithm
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SweepLineEventType {
+    End, // End comes before Start in sorting
+    Start,
+}
+
+impl SweepLineEventType {
+    pub fn other(self) -> Self {
+        match self {
+            SweepLineEventType::End => SweepLineEventType::Start,
+            SweepLineEventType::Start => SweepLineEventType::End,
+        }
+    }
+}
+
+/// An event in the sweep line algorithm
+#[derive(Debug, Clone)]
+pub struct SweepLineEvent<Edge, SweepLineEdgeSegment> {
+    /// The type of event (start or end)
+    pub event_type: SweepLineEventType,
+    /// The edge containing this segment
+    pub edge: Edge,
+    /// The vertex index where this event occurs
+    pub segment: SweepLineEdgeSegment,
 }
 
 impl<V: Copy> Iterator for FewVertices<V> {
@@ -90,6 +147,12 @@ impl<V: Copy> Iterator for FewVertices<V> {
         *self = next;
         result
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SweepLineEdgeType {
+    Bottom, // Bottom edges go from left-to-right
+    Top,    // Top edges go from right-to-left
 }
 
 pub struct MyGeometry {
@@ -123,6 +186,8 @@ impl Geometry for MyGeometry {
     type Edge = (u32, u32);
     type Extents = ExtentsF32;
     type Intersection = [f32; 2];
+    type SweepLineEdgeSegment = SweepLineEdgeType;
+    type SweepLineEventPoint = [f32; 2];
 
     const MIN_EDGE: (u32, u32) = (u32::MIN, u32::MIN);
     const MAX_EDGE: (u32, u32) = (u32::MAX, u32::MAX);
@@ -188,10 +253,6 @@ impl Geometry for MyGeometry {
         segment_bbox_f32(self.v(edge.0), self.v(edge.1), *extents, Self::EPSILON)
     }
 
-    fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering {
-        sweep_line_cmp_f32(self.v(a), self.v(b))
-    }
-
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {
         sin_cmp_f32(self.v(common), self.v(a), self.v(b))
     }
@@ -227,6 +288,110 @@ impl Geometry for MyGeometry {
 
     fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {
         ((edge.0, vertex), (vertex, edge.1))
+    }
+
+    fn sweep_line_events_for_edge(
+        &self,
+        edge: Self::Edge,
+    ) -> impl Iterator<Item = SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>> {
+        // Edges always have exactly 2 events.
+        // We will use the `segment` data to store whether this edge is bottom (going  right) or top (going left)
+        // based on how its endpoints sort in sweep-line order.
+        let segment = match sweep_line_cmp_f32(self.v(edge.0), self.v(edge.1)) {
+            Ordering::Less => SweepLineEdgeType::Bottom,
+            Ordering::Equal => {
+                panic!("Encountered a reflex edge (which are invalid)");
+            }
+            Ordering::Greater => SweepLineEdgeType::Top,
+        };
+
+        [
+            SweepLineEvent {
+                event_type: SweepLineEventType::Start,
+                edge: edge,
+                segment,
+            },
+            SweepLineEvent {
+                event_type: SweepLineEventType::End,
+                edge: edge,
+                segment,
+            },
+        ]
+        .into_iter()
+    }
+
+    fn sweep_line_event_cmp(
+        &self,
+        a: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+        b: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+    ) -> Ordering {
+        let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.segment, a.edge));
+        let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.segment, b.edge));
+
+        // Compare first by event point (sweep-line order)
+        sweep_line_cmp_f32(a_pt, b_pt)
+            // Then by event type (End before Start)
+            .then_with(|| a.event_type.cmp(&b.event_type))
+            // Then by incidence angle, bottom-to-top
+            .then_with(|| {
+                let shared_event_type = a.event_type;
+                let shared_pt = a_pt;
+                let a_other_pt = self.v(sweep_line_select_vertex(
+                    shared_event_type.other(),
+                    a.segment,
+                    a.edge,
+                ));
+                let b_other_pt = self.v(sweep_line_select_vertex(
+                    shared_event_type.other(),
+                    b.segment,
+                    b.edge,
+                ));
+                match shared_event_type {
+                    SweepLineEventType::End => sin_cmp_f32(shared_pt, a_other_pt, b_other_pt),
+                    SweepLineEventType::Start => sin_cmp_f32(shared_pt, b_other_pt, a_other_pt),
+                }
+            })
+    }
+
+    fn sweep_line_event_point(
+        &self,
+        event: &SweepLineEvent<Self::Edge, Self::SweepLineEdgeSegment>,
+    ) -> Self::SweepLineEventPoint {
+        self.v(sweep_line_select_vertex(
+            event.event_type,
+            event.segment,
+            event.edge,
+        ))
+    }
+
+    fn sweep_line_segment_cmp(
+        &self,
+        edge: Self::Edge,
+        segment: Self::SweepLineEdgeSegment,
+        event_point: &Self::SweepLineEventPoint,
+    ) -> Ordering {
+        let (left_i, right_i) = match segment {
+            SweepLineEdgeType::Bottom => (edge.0, edge.1),
+            SweepLineEdgeType::Top => (edge.1, edge.0),
+        };
+        let left_pt = self.v(left_i);
+        let right_pt = self.v(right_i);
+        sin_cmp_f32(left_pt, *event_point, right_pt)
+    }
+
+    fn sweep_line_winding_number_delta(
+        &self,
+        _edge: Self::Edge,
+        segment: Self::SweepLineEdgeSegment,
+    ) -> i32 {
+        match segment {
+            SweepLineEdgeType::Bottom => 1,
+            SweepLineEdgeType::Top => -1,
+        }
+    }
+
+    fn reverse_edge(&self, edge: Self::Edge) -> Self::Edge {
+        (edge.1, edge.0)
     }
 }
 
@@ -388,6 +553,20 @@ fn segment_bbox_f32(
 #[inline]
 fn f32_to_u16(scale: f32, offset: f32, value: f32) -> u16 {
     (value * scale + offset).max(0.).min(u16::MAX as f32) as u16
+}
+
+#[inline]
+fn sweep_line_select_vertex<T>(
+    event_type: SweepLineEventType,
+    edge_type: SweepLineEdgeType,
+    edge: (T, T),
+) -> T {
+    match (event_type, edge_type) {
+        (SweepLineEventType::Start, SweepLineEdgeType::Bottom)
+        | (SweepLineEventType::End, SweepLineEdgeType::Top) => edge.0,
+        (SweepLineEventType::Start, SweepLineEdgeType::Top)
+        | (SweepLineEventType::End, SweepLineEdgeType::Bottom) => edge.1,
+    }
 }
 
 #[cfg(test)]
