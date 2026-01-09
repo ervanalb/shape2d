@@ -518,4 +518,44 @@ mod tests {
         // Both edges pass through center, should be split there
         assert_eq!(result.len(), 4);
     }
+
+    #[test]
+    fn test_canceling_edges() {
+        let mut geometry = MyGeometry::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]);
+
+        // Two edges with same endpoints but opposite directions should cancel
+        let edges = [
+            (0, 1), // Forward edge
+            (1, 0), // Reverse edge (cancels with first)
+            (1, 2), // Different edge (should remain)
+        ];
+
+        let result = clean(&mut geometry, edges.into_iter());
+        // The two canceling edges should be removed, leaving only one
+        assert_eq!(result.len(), 1);
+        assert!(result.contains(&(1, 2)));
+    }
+
+    #[test]
+    fn test_merged_vertices_remove_short_edge() {
+        let mut geometry = MyGeometry::new(vec![
+            [0.0, 0.0],
+            [0.0, 0.0], // Coincident with vertex 0
+            [1.0, 0.0],
+        ]);
+
+        // Edge from vertex 0 to vertex 1 (which are coincident)
+        // should disappear when vertices are merged
+        let edges = [
+            (0, 1), // Very short edge between coincident vertices
+            (1, 2), // Regular edge
+        ];
+
+        let result = clean(&mut geometry, edges.into_iter());
+        // The short edge should be removed during vertex merging
+        // Only the regular edge should remain
+        assert_eq!(result.len(), 1);
+        // The edge should connect the merged vertex to vertex 2
+        assert!(result[0].1 == 2 || result[0].0 == 2);
+    }
 }
