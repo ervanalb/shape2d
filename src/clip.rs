@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
 };
 
-use crate::kernel::{Edge, Kernel, SweepLineEvent, SweepLineEventType};
+use crate::kernel::{Edge, Kernel, SweepLineEdgeSegmentChain, SweepLineEvent, SweepLineEventType};
 
 /// Edge direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,6 +19,8 @@ struct StatusEntry<K: Kernel> {
     edge: K::Edge,
     /// The active segment
     segment: K::SweepLineEdgeSegment,
+    /// Whether this is a top or bottom edge
+    chain: SweepLineEdgeSegmentChain,
     /// The winding number above this segment
     winding_above: i32,
 }
@@ -60,7 +62,7 @@ fn build_event_queue<K: Kernel>(
     }
 
     // Sort events
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp(a, b));
+    events.sort_by(|a, b| geometry.sweep_line_event_cmp_bottom_up(a, b));
     events
 }
 
@@ -82,6 +84,7 @@ fn sweep_line<K: Kernel>(
                     let ord = geometry.sweep_line_segment_cmp(
                         status_entry.edge,
                         status_entry.segment,
+                        status_entry.chain,
                         &event_point,
                     );
                     // We are looking for this point
@@ -130,6 +133,7 @@ fn sweep_line<K: Kernel>(
                     let ord = geometry.sweep_line_segment_cmp(
                         status_entry.edge,
                         status_entry.segment,
+                        status_entry.chain,
                         &event_point,
                     );
                     // We are looking for this point
@@ -146,7 +150,10 @@ fn sweep_line<K: Kernel>(
                 };
 
                 let winding_above = winding_below
-                    + geometry.sweep_line_winding_number_delta(event.edge, event.segment);
+                    + match event.chain {
+                        SweepLineEdgeSegmentChain::Bottom => 1,
+                        SweepLineEdgeSegmentChain::Top => -1,
+                    };
 
                 // Insert into status
                 status.insert(
@@ -154,6 +161,7 @@ fn sweep_line<K: Kernel>(
                     StatusEntry {
                         edge: event.edge,
                         segment: event.segment,
+                        chain: event.chain,
                         winding_above,
                     },
                 );

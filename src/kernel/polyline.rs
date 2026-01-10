@@ -1,15 +1,9 @@
 use std::cmp::Ordering;
 
 use crate::{
-    kernel::{Few, Kernel, SweepLineEvent, SweepLineEventType},
+    kernel::{Few, Kernel, SweepLineEdgeSegmentChain, SweepLineEvent, SweepLineEventType},
     rtree::Rect,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SweepLineEdgeType {
-    Bottom, // Bottom edges go from left-to-right
-    Top,    // Top edges go from right-to-left
-}
 
 pub struct F32 {
     vertices: Vec<[f32; 2]>,
@@ -42,7 +36,7 @@ impl Kernel for F32 {
     type Edge = (u32, u32);
     type Extents = ExtentsF32;
     type Intersection = [f32; 2];
-    type SweepLineEdgeSegment = SweepLineEdgeType;
+    type SweepLineEdgeSegment = ();
     type SweepLineEventPoint = [f32; 2];
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
@@ -146,32 +140,38 @@ impl Kernel for F32 {
         // Edges always have exactly 2 events.
         // We will use the `segment` data to store whether this edge is bottom (going  right) or top (going left)
         // based on how its endpoints sort in sweep-line order.
-        let segment = match sweep_line_cmp_f32(self.v(edge.0), self.v(edge.1)) {
-            Ordering::Less => SweepLineEdgeType::Bottom,
+        let chain = match sweep_line_cmp_f32(self.v(edge.0), self.v(edge.1)) {
+            Ordering::Less => SweepLineEdgeSegmentChain::Bottom,
             Ordering::Equal => {
                 panic!("Encountered a reflex edge (which are invalid)");
             }
-            Ordering::Greater => SweepLineEdgeType::Top,
+            Ordering::Greater => SweepLineEdgeSegmentChain::Top,
         };
 
         [
             SweepLineEvent {
                 event_type: SweepLineEventType::Start,
-                edge: edge,
-                segment,
+                edge,
+                segment: (),
+                chain,
             },
             SweepLineEvent {
                 event_type: SweepLineEventType::End,
-                edge: edge,
-                segment,
+                edge,
+                segment: (),
+                chain,
             },
         ]
         .into_iter()
     }
 
-    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering {
-        let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.segment, a.edge));
-        let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.segment, b.edge));
+    fn sweep_line_event_cmp_bottom_up(
+        &self,
+        a: &SweepLineEvent<Self>,
+        b: &SweepLineEvent<Self>,
+    ) -> Ordering {
+        let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.chain, a.edge));
+        let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.chain, b.edge));
 
         // Compare first by event point (sweep-line order)
         sweep_line_cmp_f32(a_pt, b_pt)
@@ -183,12 +183,12 @@ impl Kernel for F32 {
                 let shared_pt = a_pt;
                 let a_other_pt = self.v(sweep_line_select_vertex(
                     shared_event_type.other(),
-                    a.segment,
+                    a.chain,
                     a.edge,
                 ));
                 let b_other_pt = self.v(sweep_line_select_vertex(
                     shared_event_type.other(),
-                    b.segment,
+                    b.chain,
                     b.edge,
                 ));
                 match shared_event_type {
@@ -201,7 +201,7 @@ impl Kernel for F32 {
     fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint {
         self.v(sweep_line_select_vertex(
             event.event_type,
-            event.segment,
+            event.chain,
             event.edge,
         ))
     }
@@ -209,27 +209,17 @@ impl Kernel for F32 {
     fn sweep_line_segment_cmp(
         &self,
         edge: Self::Edge,
-        segment: Self::SweepLineEdgeSegment,
+        _segment: Self::SweepLineEdgeSegment,
+        chain: SweepLineEdgeSegmentChain,
         event_point: &Self::SweepLineEventPoint,
     ) -> Ordering {
-        let (left_i, right_i) = match segment {
-            SweepLineEdgeType::Bottom => (edge.0, edge.1),
-            SweepLineEdgeType::Top => (edge.1, edge.0),
+        let (left_i, right_i) = match chain {
+            SweepLineEdgeSegmentChain::Bottom => (edge.0, edge.1),
+            SweepLineEdgeSegmentChain::Top => (edge.1, edge.0),
         };
         let left_pt = self.v(left_i);
         let right_pt = self.v(right_i);
         sin_cmp_f32(left_pt, *event_point, right_pt)
-    }
-
-    fn sweep_line_winding_number_delta(
-        &self,
-        _edge: Self::Edge,
-        segment: Self::SweepLineEdgeSegment,
-    ) -> i32 {
-        match segment {
-            SweepLineEdgeType::Bottom => 1,
-            SweepLineEdgeType::Top => -1,
-        }
     }
 }
 
@@ -396,14 +386,14 @@ fn f32_to_u16(scale: f32, offset: f32, value: f32) -> u16 {
 #[inline]
 fn sweep_line_select_vertex<T>(
     event_type: SweepLineEventType,
-    edge_type: SweepLineEdgeType,
+    edge_type: SweepLineEdgeSegmentChain,
     edge: (T, T),
 ) -> T {
     match (event_type, edge_type) {
-        (SweepLineEventType::Start, SweepLineEdgeType::Bottom)
-        | (SweepLineEventType::End, SweepLineEdgeType::Top) => edge.0,
-        (SweepLineEventType::Start, SweepLineEdgeType::Top)
-        | (SweepLineEventType::End, SweepLineEdgeType::Bottom) => edge.1,
+        (SweepLineEventType::Start, SweepLineEdgeSegmentChain::Bottom)
+        | (SweepLineEventType::End, SweepLineEdgeSegmentChain::Top) => edge.0,
+        (SweepLineEventType::Start, SweepLineEdgeSegmentChain::Top)
+        | (SweepLineEventType::End, SweepLineEdgeSegmentChain::Bottom) => edge.1,
     }
 }
 

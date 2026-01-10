@@ -68,7 +68,11 @@ pub trait Kernel: Sized {
         edge: Self::Edge,
     ) -> impl Iterator<Item = SweepLineEvent<Self>>;
 
-    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering;
+    fn sweep_line_event_cmp_bottom_up(
+        &self,
+        a: &SweepLineEvent<Self>,
+        b: &SweepLineEvent<Self>,
+    ) -> Ordering;
 
     fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint;
 
@@ -76,14 +80,9 @@ pub trait Kernel: Sized {
         &self,
         edge: Self::Edge,
         segment: Self::SweepLineEdgeSegment,
+        chain: SweepLineEdgeSegmentChain,
         event_point: &Self::SweepLineEventPoint,
     ) -> Ordering;
-
-    fn sweep_line_winding_number_delta(
-        &self,
-        edge: Self::Edge,
-        segment: Self::SweepLineEdgeSegment,
-    ) -> i32;
 }
 
 pub trait Edge: Copy + Ord {
@@ -124,6 +123,8 @@ pub struct SweepLineEvent<G: Kernel> {
     pub edge: G::Edge,
     /// The vertex index where this event occurs
     pub segment: G::SweepLineEdgeSegment,
+    /// Whether this segment is the top or bottom of an enclosed area
+    pub chain: SweepLineEdgeSegmentChain,
 }
 
 impl<T: Copy> Iterator for Few<T> {
@@ -147,4 +148,10 @@ impl Edge for (u32, u32) {
     fn reversed(self) -> Self {
         (self.1, self.0)
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum SweepLineEdgeSegmentChain {
+    Bottom, // Bottom edges go from left-to-right
+    Top,    // Top edges go from right-to-left
 }

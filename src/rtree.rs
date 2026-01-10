@@ -49,7 +49,7 @@ impl Rect {
         // Calculate center point, being careful about overflow
         let center_x = ((self.min[0] as u32 + self.max[0] as u32) / 2) as u16;
         let center_y = ((self.min[1] as u32 + self.max[1] as u32) / 2) as u16;
-        crate::hilbert::xy_to_hilbert(center_x, center_y)
+        xy_to_hilbert(center_x, center_y)
     }
 }
 
