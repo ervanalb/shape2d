@@ -73,16 +73,13 @@ impl MonotoneComponentAllocator {
 
 struct IndexedList<T>(Vec<T>);
 
-impl<T> IndexedList<T> {
+impl<T: std::fmt::Debug> IndexedList<T> {
     fn new() -> Self {
         Self(vec![])
     }
-    // TODO: consider avoiding pushing a vertex more than once
-    // (store a mapping and have a push_if_new() function?)
-    // (or maybe pushing a vertex more than once is important
-    // for preserving edge-specific metadata?)
     fn push(&mut self, value: T) -> u32 {
         let i = self.0.len() as u32;
+        println!("Push vertex {value:?} as {i}");
         self.0.push(value);
         i
     }
@@ -108,33 +105,36 @@ fn partition_into_monotone<G: Kernel>(
     let mut events = Vec::new();
     for edge in edges {
         for event in geometry.sweep_line_events_for_edge(edge) {
-            events.push(event);
+            let pt = geometry.sweep_line_event_point(&event);
+            events.push((pt, event));
         }
     }
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp_clockwise(a, b));
+    // TODO: could make use of already-computed event point in sweep_line_event_cmp
+    events.sort_by(|(_, a), (_, b)| geometry.sweep_line_event_cmp_clockwise(a, b));
 
-    let (event_pairs, remainder) = events.as_chunks::<2>();
-    if remainder.len() > 0 {
-        panic!("Topology error--vertex with odd number of edges");
-    }
+    // Iterate over events for each vertex
+    for vertex_events in events.chunk_by(|(p1, _), (p2, _)| p1 == p2) {
+        let (pt, _) = vertex_events[0];
+        let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(pt));
 
-    // Process events in pairs around each vertex
-    for [e1, e2] in event_pairs {
-        let v = geometry.sweep_line_event_point(&e1);
-        let v2 = geometry.sweep_line_event_point(&e2);
-        if v != v2 {
+        let (event_pairs, remainder) = vertex_events.as_chunks::<2>();
+        if remainder.len() > 0 {
             panic!("Topology error--vertex with odd number of edges");
         }
-        process_event_pair(
-            geometry,
-            v,
-            e1,
-            e2,
-            &mut vertices,
-            &mut monotone_events,
-            &mut status,
-            &mut monotone_component_allocator,
-        );
+
+        for [(_, e1), (_, e2)] in event_pairs {
+            process_event_pair(
+                geometry,
+                pt,
+                vertex_index,
+                e1,
+                e2,
+                &mut vertices,
+                &mut monotone_events,
+                &mut status,
+                &mut monotone_component_allocator,
+            );
+        }
     }
 
     (vertices.into(), monotone_events)
@@ -144,6 +144,7 @@ fn partition_into_monotone<G: Kernel>(
 fn process_event_pair<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     event_a: &SweepLineEvent<G>,
     event_b: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
@@ -166,9 +167,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Bottom,
         ) => {
             // Start(Top) + Start(Bottom) = start vertex
+            println!("vertex {:?} is a start vertex", vertex);
             handle_start_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -184,9 +187,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Top,
         ) => {
             // Start(Bottom) + Start(Top) = split vertex
+            println!("vertex {:?} is a split vertex", vertex);
             handle_split_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -202,9 +207,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Top,
         ) => {
             // End(Bottom) + End(Top) = end vertex
+            println!("vertex {:?} is a end vertex", vertex);
             handle_end_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -219,9 +226,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Bottom,
         ) => {
             // End(Top) + End(Bottom) = merge vertex
+            println!("vertex {:?} is a merge vertex", vertex);
             handle_merge_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -236,9 +245,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Bottom,
         ) => {
             // End(Bottom) + Start(Bottom) = bottom vertex
+            println!("vertex {:?} is a bottom vertex", vertex);
             handle_bottom_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -253,9 +264,11 @@ fn process_event_pair<G: Kernel>(
             SweepLineChain::Top,
         ) => {
             // End(Top) + Start(Top) = top vertex
+            println!("vertex {:?} is a top vertex", vertex);
             handle_top_vertex(
                 geometry,
                 vertex,
+                vertex_index,
                 event_a,
                 event_b,
                 vertices,
@@ -273,9 +286,10 @@ fn process_event_pair<G: Kernel>(
 fn handle_start_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     _upper_event: &SweepLineEvent<G>,
     lower_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
+    _vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
     status: &mut Vec<StatusEntry<G>>,
     monotone_component_allocator: &mut MonotoneComponentAllocator,
@@ -283,13 +297,11 @@ fn handle_start_vertex<G: Kernel>(
     let monotone_component = monotone_component_allocator.allocate();
 
     // Output vertex V with component I, chain Bottom
-    let triangle_vertex = geometry.sweep_line_event_point_to_triangle_vertex(vertex);
-    let vertex_index = vertices.push(triangle_vertex);
-    monotone_events.push(MonotoneEvent {
+    monotone_events.push(dbg!(MonotoneEvent {
         vertex_index,
         monotone_component,
         chain: SweepLineChain::Bottom,
-    });
+    }));
 
     // Insert lower segment into status
     let pos = find_insertion_point(geometry, status, vertex);
@@ -311,6 +323,7 @@ fn handle_start_vertex<G: Kernel>(
 fn handle_end_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     lower_event: &SweepLineEvent<G>,
     upper_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
@@ -340,12 +353,11 @@ fn handle_end_vertex<G: Kernel>(
     );
 
     // Output V with index I, chain Top (component end vertex)
-    let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(vertex));
-    monotone_events.push(MonotoneEvent {
+    monotone_events.push(dbg!(MonotoneEvent {
         vertex_index,
         monotone_component: component_i,
         chain: SweepLineChain::Top,
-    });
+    }));
 
     // Check if helper was a merge vertex
     if let HelperType::Merge {
@@ -363,11 +375,11 @@ fn handle_end_vertex<G: Kernel>(
         );
 
         // Output a second V with index J, chain Top (component end vertex)
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component_j,
             chain: SweepLineChain::Top,
-        });
+        }));
     } else {
         // Output upper segment with index I, chain Top
         output_edge_segment(
@@ -385,9 +397,10 @@ fn handle_end_vertex<G: Kernel>(
 fn handle_split_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     upper_event: &SweepLineEvent<G>,
     _lower_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
+    _vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
     status: &mut Vec<StatusEntry<G>>,
     monotone_component_allocator: &mut MonotoneComponentAllocator,
@@ -399,25 +412,25 @@ fn handle_split_vertex<G: Kernel>(
     let helper_type = segment_below.helper_type;
     let component_i = segment_below.monotone_component;
 
-    let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(vertex));
-
     match helper_type {
         HelperType::Merge {
             upper_component: component_j,
         } => {
-            // Output V with index J, chain Bottom
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_j,
-                chain: SweepLineChain::Bottom,
-            });
+            if helper_vertex != vertex_index {
+                // Output V with index J, chain Bottom
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_j,
+                    chain: SweepLineChain::Bottom,
+                }));
 
-            // Output V with index I, chain Top
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_i,
-                chain: SweepLineChain::Top,
-            });
+                // Output V with index I, chain Top
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_i,
+                    chain: SweepLineChain::Top,
+                }));
+            }
 
             // Edit the status to replace the existing helper H with V and set the helper type to Top
             segment_below.helper_vertex = vertex_index;
@@ -442,25 +455,27 @@ fn handle_split_vertex<G: Kernel>(
             let component_j = monotone_component_allocator.allocate();
 
             // Output H with index J, chain Bottom (component start vertex)
-            monotone_events.push(MonotoneEvent {
+            monotone_events.push(dbg!(MonotoneEvent {
                 vertex_index: helper_vertex,
                 monotone_component: component_j,
                 chain: SweepLineChain::Bottom,
-            });
+            }));
 
-            // Output V with index J, chain Top
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_j,
-                chain: SweepLineChain::Top,
-            });
+            if helper_vertex != vertex_index {
+                // Output V with index J, chain Top
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_j,
+                    chain: SweepLineChain::Top,
+                }));
 
-            // Output V with index I, chain Bottom
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_i,
-                chain: SweepLineChain::Bottom,
-            });
+                // Output V with index I, chain Bottom
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_i,
+                    chain: SweepLineChain::Bottom,
+                }));
+            }
 
             // Edit status to replace existing index I with J
             // Edit status to replace existing helper H with V and set helper type to Top
@@ -487,25 +502,27 @@ fn handle_split_vertex<G: Kernel>(
             let component_j = monotone_component_allocator.allocate();
 
             // Output H with index J, chain Bottom (component start vertex)
-            monotone_events.push(MonotoneEvent {
+            monotone_events.push(dbg!(MonotoneEvent {
                 vertex_index: helper_vertex,
                 monotone_component: component_j,
                 chain: SweepLineChain::Bottom,
-            });
+            }));
 
-            // Output V with index J, chain Bottom
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_j,
-                chain: SweepLineChain::Bottom,
-            });
+            if helper_vertex != vertex_index {
+                // Output V with index J, chain Bottom
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_j,
+                    chain: SweepLineChain::Bottom,
+                }));
 
-            // Output V with index I, chain Top
-            monotone_events.push(MonotoneEvent {
-                vertex_index,
-                monotone_component: component_i,
-                chain: SweepLineChain::Top,
-            });
+                // Output V with index I, chain Top
+                monotone_events.push(dbg!(MonotoneEvent {
+                    vertex_index,
+                    monotone_component: component_i,
+                    chain: SweepLineChain::Top,
+                }));
+            }
 
             // Edit status to replace existing helper H with V and set helper type to Top
             segment_below.helper_vertex = vertex_index;
@@ -532,6 +549,7 @@ fn handle_split_vertex<G: Kernel>(
 fn handle_merge_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     lower_event: &SweepLineEvent<G>,
     upper_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
@@ -547,16 +565,16 @@ fn handle_merge_vertex<G: Kernel>(
         upper_event.segment,
     );
     let upper_segment = status.remove(pos);
+    let helper2_vertex = upper_segment.helper_vertex;
     let helper2_type = upper_segment.helper_type;
     let component_i2 = upper_segment.monotone_component;
 
     // Search status to find segment directly below this vertex, noting its index I and helper H
     let i = find_status_below(geometry, status, vertex);
     let segment_below = &mut status[i];
+    let helper_h_vertex = segment_below.helper_vertex;
     let helper_h_type = segment_below.helper_type;
     let component_i = segment_below.monotone_component;
-
-    let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(vertex));
 
     // Handle lower segment
     if let HelperType::Merge {
@@ -573,12 +591,14 @@ fn handle_merge_vertex<G: Kernel>(
             SweepLineChain::Top,
         );
 
-        // Output V with index J, chain Top (component end vertex)
-        monotone_events.push(MonotoneEvent {
-            vertex_index,
-            monotone_component: component_j,
-            chain: SweepLineChain::Top,
-        });
+        if helper_h_vertex != vertex_index {
+            // Output V with index J, chain Top (component end vertex)
+            monotone_events.push(dbg!(MonotoneEvent {
+                vertex_index,
+                monotone_component: component_j,
+                chain: SweepLineChain::Top,
+            }));
+        }
     } else {
         // Output lower segment with index I, chain Top
         output_edge_segment(
@@ -592,11 +612,11 @@ fn handle_merge_vertex<G: Kernel>(
     }
 
     // (both cases) Output V with index I, chain Top
-    monotone_events.push(MonotoneEvent {
+    monotone_events.push(dbg!(MonotoneEvent {
         vertex_index,
         monotone_component: component_i,
         chain: SweepLineChain::Top,
-    });
+    }));
 
     // Output upper segment with index I2, chain Bottom
     output_edge_segment(
@@ -612,19 +632,22 @@ fn handle_merge_vertex<G: Kernel>(
         upper_component: component_j2,
     } = helper2_type
     {
-        // Output V with index I2, chain Top (component end vertex)
-        monotone_events.push(MonotoneEvent {
-            vertex_index,
-            monotone_component: component_i2,
-            chain: SweepLineChain::Top,
-        });
+        // Not entirely sure if this is right or if the conditional should be on the other "output"
+        if helper2_vertex != vertex_index {
+            // Output V with index I2, chain Top (component end vertex)
+            monotone_events.push(dbg!(MonotoneEvent {
+                vertex_index,
+                monotone_component: component_i2,
+                chain: SweepLineChain::Top,
+            }));
+        }
 
         // Output V with index J2, chain Bottom
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component_j2,
             chain: SweepLineChain::Bottom,
-        });
+        }));
 
         // Edit status to set existing helper H to V (merge helper index = J2)
         segment_below.helper_vertex = vertex_index;
@@ -633,11 +656,11 @@ fn handle_merge_vertex<G: Kernel>(
         };
     } else {
         // Output V with index I2, chain Bottom
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component_i2,
             chain: SweepLineChain::Bottom,
-        });
+        }));
 
         // Edit status to set existing helper H to V (merge helper index = I2)
         segment_below.helper_vertex = vertex_index;
@@ -651,6 +674,7 @@ fn handle_merge_vertex<G: Kernel>(
 fn handle_bottom_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     left_event: &SweepLineEvent<G>,
     right_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
@@ -658,15 +682,15 @@ fn handle_bottom_vertex<G: Kernel>(
     status: &mut Vec<StatusEntry<G>>,
 ) {
     // Search status & remove left segment, noting its index I and helper H
-    let event_point = geometry.sweep_line_event_point(left_event);
     let pos = find_status_entry(
         geometry,
         status,
-        event_point,
+        vertex,
         left_event.edge,
         left_event.segment,
     );
     let entry = status.remove(pos);
+    let helper_vertex = entry.helper_vertex;
     let helper_type = entry.helper_type;
     let component = entry.monotone_component;
 
@@ -680,26 +704,26 @@ fn handle_bottom_vertex<G: Kernel>(
         SweepLineChain::Bottom,
     );
 
-    let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(vertex));
-
     // Check if helper is a merge vertex
     if let HelperType::Merge { upper_component } = helper_type {
-        // Output V with index I, chain Top (component end vertex)
-        monotone_events.push(MonotoneEvent {
-            vertex_index,
-            monotone_component: component,
-            chain: SweepLineChain::Top,
-        });
+        if helper_vertex != vertex_index {
+            // Output V with index I, chain Top (component end vertex)
+            monotone_events.push(dbg!(MonotoneEvent {
+                vertex_index,
+                monotone_component: component,
+                chain: SweepLineChain::Top,
+            }));
+        }
 
         // Output V with index J, chain Bottom
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: upper_component,
             chain: SweepLineChain::Bottom,
-        });
+        }));
 
         // Insert right segment into status with index J and helper V (helper type: Bottom)
-        let pos = find_insertion_point(geometry, status, event_point);
+        let pos = find_insertion_point(geometry, status, vertex);
         status.insert(
             pos,
             StatusEntry {
@@ -713,14 +737,14 @@ fn handle_bottom_vertex<G: Kernel>(
         );
     } else {
         // Output V with index I, chain Bottom
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component,
             chain: SweepLineChain::Bottom,
-        });
+        }));
 
         // Insert right segment into status with index I and helper V (helper type: Bottom)
-        let pos = find_insertion_point(geometry, status, event_point);
+        let pos = find_insertion_point(geometry, status, vertex);
         status.insert(
             pos,
             StatusEntry {
@@ -739,6 +763,7 @@ fn handle_bottom_vertex<G: Kernel>(
 fn handle_top_vertex<G: Kernel>(
     geometry: &mut G,
     vertex: G::SweepLineEventPoint,
+    vertex_index: u32,
     left_event: &SweepLineEvent<G>,
     _right_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
@@ -747,10 +772,9 @@ fn handle_top_vertex<G: Kernel>(
 ) {
     // Search status to find segment directly below this vertex, noting its index I and helper H
     let below_pos = find_status_below(geometry, status, vertex);
+    let helper_vertex = status[below_pos].helper_vertex;
     let helper_type = status[below_pos].helper_type;
     let component = status[below_pos].monotone_component;
-
-    let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(vertex));
 
     // Check if helper is a merge vertex
     if let HelperType::Merge { upper_component } = helper_type {
@@ -764,12 +788,14 @@ fn handle_top_vertex<G: Kernel>(
             SweepLineChain::Top,
         );
 
-        // Output V with index J, chain Top (component end vertex)
-        monotone_events.push(MonotoneEvent {
-            vertex_index,
-            monotone_component: upper_component,
-            chain: SweepLineChain::Top,
-        });
+        if helper_vertex != vertex_index {
+            // Output V with index J, chain Top (component end vertex)
+            monotone_events.push(dbg!(MonotoneEvent {
+                vertex_index,
+                monotone_component: upper_component,
+                chain: SweepLineChain::Top,
+            }));
+        }
     } else {
         // Output left segment with index I, chain Top
         output_edge_segment(
@@ -783,11 +809,11 @@ fn handle_top_vertex<G: Kernel>(
     }
 
     // (both cases) Output V with index I, chain Top
-    monotone_events.push(MonotoneEvent {
+    monotone_events.push(dbg!(MonotoneEvent {
         vertex_index,
         monotone_component: component,
         chain: SweepLineChain::Top,
-    });
+    }));
 
     // Edit status to set existing helper H to V (helper type: Top)
     status[below_pos].helper_vertex = vertex_index;
@@ -808,6 +834,7 @@ fn find_insertion_point<G: Kernel>(
 }
 
 /// Find a specific status entry by edge and segment
+// TODO: factor this out, along with the similar code in clip.rs, into a sweep_line module
 fn find_status_entry<G: Kernel>(
     geometry: &G,
     status: &[StatusEntry<G>],
@@ -837,6 +864,7 @@ fn find_status_entry<G: Kernel>(
 }
 
 /// Find the status entry directly below a vertex
+// TODO: factor this out, along with the similar code in clip.rs, into a sweep_line module
 fn find_status_below<G: Kernel>(
     geometry: &G,
     status: &[StatusEntry<G>],
@@ -869,16 +897,16 @@ fn output_edge_segment<G: Kernel>(
         event.chain,
     ) {
         let vertex_index = vertices.push(triangle_vertex);
-        monotone_events.push(MonotoneEvent {
+        monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component,
             chain,
-        });
+        }));
     }
 }
 
 /// Stage 2: Triangulate monotone components
-fn triangulate_monotone<T: TriangleVertex>(
+fn triangulate_monotone<T: TriangleVertex + std::fmt::Debug>(
     vertices: &[T],
     mut events: Vec<MonotoneEvent>,
 ) -> Vec<[u32; 3]> {
@@ -892,6 +920,9 @@ fn triangulate_monotone<T: TriangleVertex>(
                 vertices[a.vertex_index as usize].sweep_line_cmp(&vertices[b.vertex_index as usize])
             })
     });
+
+    println!("Vertices are: {:?}", vertices);
+    println!("Monotone components are: {:?}", events);
 
     let mut stack: Vec<MonotoneEvent> = Vec::new();
 
@@ -909,7 +940,7 @@ fn triangulate_monotone<T: TriangleVertex>(
                 .expect("Component has fewer than three vertices"),
         );
 
-        for &v in events {
+        for &v in events_iter {
             // Peek the top of the stack
             let &top = stack.last().unwrap();
 
@@ -984,4 +1015,493 @@ fn triangulate_monotone<T: TriangleVertex>(
     }
 
     triangles
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::polyline::F32 as Kernel;
+
+    /// Helper to verify triangle winding and that all triangles reference valid vertices
+    fn verify_triangulation(vertices: &[[f32; 2]], triangles: &[[u32; 3]]) {
+        for &[i0, i1, i2] in triangles {
+            assert!((i0 as usize) < vertices.len());
+            assert!((i1 as usize) < vertices.len());
+            assert!((i2 as usize) < vertices.len());
+
+            // Check that triangle has positive area (counter-clockwise winding)
+            let v0 = vertices[i0 as usize];
+            let v1 = vertices[i1 as usize];
+            let v2 = vertices[i2 as usize];
+
+            let cross = (v1[0] - v0[0]) * (v2[1] - v0[1]) - (v1[1] - v0[1]) * (v2[0] - v0[0]);
+            assert!(
+                cross > 0.0,
+                "Triangle [{}, {}, {}] has negative or zero winding: {:?} {:?} {:?}",
+                i0,
+                i1,
+                i2,
+                v0,
+                v1,
+                v2
+            );
+        }
+    }
+
+    #[test]
+    fn test_simple_triangle() {
+        // Simple triangle - has start, top, and end vertices
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
+        let edges = vec![(0, 1), (1, 2), (2, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 1, "Triangle should produce 1 triangle");
+    }
+
+    #[test]
+    fn test_simple_quad() {
+        // Simple convex quad - has start, top, bottom, and end vertices
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2, "Quad should produce 2 triangles");
+    }
+
+    #[test]
+    fn test_regular_polygons() {
+        use std::f32::consts::TAU;
+
+        for sides in [3, 4, 5, 6, 7, 8, 9, 10] {
+            eprintln!("Testing {}-gon", sides);
+
+            let verts = (0..sides)
+                .map(|i| {
+                    let angle = (i as f32) * TAU / (sides as f32);
+                    [angle.cos(), angle.sin()]
+                })
+                .collect();
+            let edges = (0..sides).map(|i| (i, (i + 1) % sides));
+
+            let mut kernel = Kernel::new(verts);
+            let (vertices, triangles) = triangulate(&mut kernel, edges);
+
+            verify_triangulation(&vertices, &triangles);
+            assert_eq!(triangles.len(), (sides - 2) as usize);
+        }
+    }
+
+    #[test]
+    fn test_top_and_bottom_vertices() {
+        // 4--3
+        // |   \
+        // |    2--1
+        // |       |
+        // 5-------0
+        //
+        // Classifications:
+        // 5 = start
+        // 4 = top
+        // 3 = top
+        // 2 = top
+        // 0 = bottom
+        // 1 = end
+        let mut kernel = Kernel::new(vec![
+            [3.0, 0.0], // 0
+            [3.0, 2.0], // 1
+            [2.0, 2.0], // 2
+            [1.0, 3.0], // 3
+            [0.0, 3.0], // 4
+            [0.0, 0.0], // 5
+        ]);
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 4);
+    }
+
+    #[test]
+    fn test_split_vertex() {
+        //   /--2
+        //  /  /
+        // 3  1
+        //  \  \
+        //   \--0
+        //
+        // Classifications:
+        // 3 = start
+        // 1 = split
+        // 0 = end
+        // 2 = end
+        let mut kernel = Kernel::new(vec![
+            [2.0, 0.0], // 0
+            [1., 1.],   // 1
+            [2.0, 2.0], // 2
+            [0.0, 1.0], // 3
+        ]);
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2,);
+    }
+
+    #[test]
+    fn test_merge_vertex() {
+        // Polygon with a merge vertex (concave pointing right)
+        // Creates a notch that merges monotone regions
+        //
+        // 2--\
+        //  \  \
+        //   3  1
+        //  /  /
+        // 0--/
+        //
+        // Classifications:
+        // 0 = start
+        // 2 = start
+        // 3 = merge
+        // 1 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 0.0], // 0
+            [2.0, 1.0], // 1
+            [0.0, 2.0], // 2
+            [1.0, 1.0], // 3
+        ]);
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2);
+    }
+
+    #[test]
+    fn test_split_and_merge() {
+        // 4------3
+        //  \    /
+        //   5  2
+        //  /    \
+        // 0------1
+        //
+        // Classifications:
+        // 0 = start
+        // 4 = start
+        // 5 = split
+        // 2 = merge
+        // 1 = end
+        // 3 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 0.0], // 0
+            [3.0, 0.0], // 1
+            [2.0, 1.0], // 2
+            [3.0, 2.0], // 3
+            [0.0, 2.0], // 4
+            [1.0, 1.0], // 5
+        ]);
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 4,);
+    }
+
+    #[test]
+    fn test_split_top_bottom() {
+        // This tests splitting with a top helper & bottom helper
+        //
+        //     /-6
+        //    / /
+        //   7 5-----4
+        //  /       /
+        // 0-----1 3
+        //        \ \
+        //         \-2
+        //
+        // Classifications:
+        // 0 = start
+        // 7 = top
+        // 5 = split (helper=7)
+        // 1 = bottom
+        // 6 = end
+        // 3 = split (helper=1)
+        // 2 = end
+        // 4 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 1.0], // 0
+            [3.0, 1.0], // 1
+            [5.0, 0.0], // 2
+            [4.0, 1.0], // 3
+            [5.0, 2.0], // 4
+            [2.0, 2.0], // 5
+            [3.0, 3.0], // 6
+            [1.0, 2.0], // 7
+        ]);
+        let edges = vec![
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 0),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 6);
+    }
+
+    #[test]
+    fn test_combs() {
+        // 6--\
+        // |   5
+        // |  /
+        // | 4
+        // |  \
+        // |   3
+        // |  /
+        // | 2
+        // |  \
+        // |   1
+        // 0--/
+        let right_comb = [
+            [0.0, 0.0],
+            [2.0, 1.0],
+            [1.0, 2.0],
+            [2.0, 3.0],
+            [1.0, 4.0],
+            [2.0, 5.0],
+            [0.0, 6.0],
+        ];
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 6), (6, 0)];
+
+        let up_comb = right_comb.map(|[x, y]| [-y, x]);
+        let left_comb = right_comb.map(|[x, y]| [-x, -y]);
+        let down_comb = right_comb.map(|[x, y]| [y, -x]);
+
+        for (desc, comb) in [
+            ("right", right_comb),
+            ("up", up_comb),
+            ("left", left_comb),
+            ("down", down_comb),
+        ] {
+            eprintln!("Testing comb: {}", desc);
+            let mut kernel = Kernel::new(comb.to_vec());
+
+            let (vertices, triangles) = triangulate(&mut kernel, edges.iter().copied());
+
+            verify_triangulation(&vertices, &triangles);
+            assert_eq!(triangles.len(), 5);
+        }
+    }
+
+    #[test]
+    fn test_square_with_holes() {
+        // Square with three triangular holes (not touching edges)
+        let mut kernel = Kernel::new(vec![
+            // Outer square (counter-clockwise)
+            [0.0, 0.0],   // 0
+            [10.0, 0.0],  // 1
+            [10.0, 10.0], // 2
+            [0.0, 10.0],  // 3
+            // Triangle hole 1
+            [2.0, 2.0], // 4
+            [3.0, 4.0], // 5
+            [4.0, 2.0], // 6
+            // Triangle hole 2
+            [4.0, 7.0], // 7
+            [5.0, 9.0], // 8
+            [6.0, 7.0], // 9
+            // Triangle hole 3
+            [6.0, 2.0], // 10
+            [7.0, 4.0], // 11
+            [8.0, 2.0], // 12
+        ]);
+
+        let edges = vec![
+            // Outer square
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            // Triangle hole 1
+            (4, 5),
+            (5, 6),
+            (6, 4),
+            // Triangle hole 2
+            (7, 8),
+            (8, 9),
+            (9, 7),
+            // Triangle hole 3
+            (10, 11),
+            (11, 12),
+            (12, 10),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 17);
+    }
+
+    #[test]
+    fn test_square_with_edge_holes() {
+        // 6---5---4
+        // |~~/ \~~|
+        // |~B---A~|
+        // |/|~~~|\|
+        // 7 |~~~| 3
+        // |\|~~~|/|
+        // |~8---9~|
+        // |~~\ /~~|
+        // 0---1---2
+        //
+        // Outer boundary: 0-1-2-3-4-5-6-7
+        // Four triangular holes connecting them
+        let mut kernel = Kernel::new(vec![
+            // Outer boundary
+            [0.0, 0.0], // 0 - bottom-left corner
+            [2.0, 0.0], // 1 - bottom edge midpoint
+            [4.0, 0.0], // 2 - bottom-right corner
+            [4.0, 2.0], // 3 - right edge midpoint
+            [4.0, 4.0], // 4 - top-right corner
+            [2.0, 4.0], // 5 - top edge midpoint
+            [0.0, 4.0], // 6 - top-left corner
+            [0.0, 2.0], // 7 - left edge midpoint
+            // Inner square
+            [1.0, 1.0], // 8 - bottom of inner square
+            [3.0, 1.0], // 9 - right of inner square
+            [3.0, 3.0], // A - top of inner square
+            [1.0, 3.0], // B - left of inner square
+        ]);
+
+        let edges = vec![
+            // Outer perimeter (counter-clockwise)
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 0),
+            // Triangle hole 1
+            (1, 8),
+            (8, 9),
+            (9, 1),
+            // Triangle hole 2
+            (3, 9),
+            (9, 10),
+            (10, 3),
+            // Triangle hole 3
+            (5, 10),
+            (10, 11),
+            (11, 5),
+            // Triangle hole 4
+            (7, 11),
+            (11, 8),
+            (8, 7),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 10);
+    }
+
+    #[test]
+    fn test_star_cross() {
+        //    5-4
+        //    \~/
+        //  6\ v /3
+        //  |~>8<~|
+        //  7/ ^ \2
+        //    /~\
+        //    0-1
+
+        let mut kernel = Kernel::new(vec![
+            [1.0, 0.0], // 0
+            [3.0, 0.0], // 1
+            [4.0, 1.0], // 2
+            [4.0, 3.0], // 3
+            [3.0, 4.0], // 4
+            [1.0, 4.0], // 5
+            [0.0, 3.0], // 6
+            [0.0, 1.0], // 7
+            [2.0, 2.0], // 8
+        ]);
+
+        let edges = vec![
+            // Bottom triangle
+            (0, 1),
+            (1, 8),
+            (8, 0),
+            // Right triangle
+            (2, 3),
+            (3, 8),
+            (8, 2),
+            // Top triangle
+            (4, 5),
+            (5, 8),
+            (8, 4),
+            // Left triangle
+            (6, 7),
+            (7, 8),
+            (8, 6),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 4);
+    }
+
+    #[test]
+    fn test_star_cross_2() {
+        // Same as star_cross but rotated 45 degrees
+        let mut kernel = Kernel::new(vec![
+            [0.0, 1.0],
+            [1.0, 0.0],
+            [3.0, 0.0],
+            [4.0, 1.0],
+            [4.0, 3.0],
+            [3.0, 4.0],
+            [1.0, 4.0],
+            [0.0, 3.0],
+            [2.0, 2.0],
+        ]);
+
+        let edges = vec![
+            // Bottom-left triangle
+            (0, 1),
+            (1, 8),
+            (8, 0),
+            // Bottom-right triangle
+            (2, 3),
+            (3, 8),
+            (8, 2),
+            // Top-right triangle
+            (4, 5),
+            (5, 8),
+            (8, 4),
+            // Top-left triangle
+            (6, 7),
+            (7, 8),
+            (8, 6),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 4);
+    }
 }

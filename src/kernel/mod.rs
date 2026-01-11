@@ -1,14 +1,15 @@
 use crate::rtree::Rect;
 use std::cmp::Ordering;
+use std::fmt::Debug;
 pub mod polyline;
 
 pub trait Kernel: Sized {
-    type Vertex: Copy + Ord;
+    type Vertex: Copy + Ord + Debug;
     type Edge: Edge;
     type Extents;
     type Intersection;
-    type SweepLineEdgeSegment: Copy + PartialEq;
-    type SweepLineEventPoint: Copy + PartialEq;
+    type SweepLineEdgeSegment: Copy + PartialEq + Debug;
+    type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleVertex: TriangleVertex;
 
     /// Check if two vertices are coincident (at the same location)
@@ -105,7 +106,7 @@ pub trait Kernel: Sized {
     ) -> Ordering;
 }
 
-pub trait TriangleVertex: Copy {
+pub trait TriangleVertex: Copy + Debug {
     /// Compare vertices in sweep-line order (left-to-right, bottom-to-top)
     fn sweep_line_cmp(&self, other: &Self) -> Ordering;
 
@@ -117,7 +118,7 @@ pub trait TriangleVertex: Copy {
     fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering;
 }
 
-pub trait Edge: Copy + Ord {
+pub trait Edge: Copy + Ord + Debug {
     const MIN: Self;
     const MAX: Self;
 
