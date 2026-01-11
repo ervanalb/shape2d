@@ -893,85 +893,93 @@ fn triangulate_monotone<T: TriangleVertex>(
             })
     });
 
+    let mut stack: Vec<MonotoneEvent> = Vec::new();
+
     // Process each monotone component
-    let mut stack: Vec<u32> = Vec::new();
-    let mut current_component = None;
+    for events in events.chunk_by(|a, b| a.monotone_component == b.monotone_component) {
+        stack.clear();
 
-    for (event_idx, event) in events.iter().enumerate() {
-        // Check if we're starting a new component
-        if current_component != Some(event.monotone_component) {
-            current_component = Some(event.monotone_component);
-            stack.clear();
+        let mut events_iter = events.into_iter();
 
-            // Push first two vertices onto stack
-            if event_idx + 1 < events.len()
-                && events[event_idx + 1].monotone_component == event.monotone_component
-            {
-                stack.push(event.vertex_index);
-                stack.push(events[event_idx + 1].vertex_index);
-            }
-            continue;
-        }
+        // Push first two vertices onto stack
+        stack.push(*events_iter.next().unwrap());
+        stack.push(
+            *events_iter
+                .next()
+                .expect("Component has fewer than three vertices"),
+        );
 
-        // Skip if this was the second vertex of a new component
-        if event_idx >= 2 && events[event_idx - 1].monotone_component != event.monotone_component {
-            continue;
-        }
+        for &v in events {
+            // Peek the top of the stack
+            let &top = stack.last().unwrap();
 
-        let v = event.vertex_index;
-        let v_chain = event.chain;
+            if v.chain != top.chain {
+                // Different chains: pop all and form triangles
+                loop {
+                    // Pop a vertex A from the stack
+                    let a = stack.pop().unwrap();
 
-        if stack.is_empty() {
-            continue;
-        }
+                    // Peek a second vertex B from the stack. If this fails, the stack is empty and we are done.
+                    let Some(b) = stack.last() else {
+                        break;
+                    };
 
-        let top_idx = *stack.last().unwrap();
-        let top_event = events.iter().find(|e| e.vertex_index == top_idx).unwrap();
-        let top_chain = top_event.chain;
-
-        if v_chain != top_chain {
-            // Different chains: pop all and form triangles
-            let mut prev = stack[0];
-            for &curr in &stack[1..] {
-                if v_chain == SweepLineChain::Bottom {
-                    triangles.push([v, prev, curr]);
-                } else {
-                    triangles.push([v, curr, prev]);
+                    // We are guaranteed to be able to form all triangles
+                    triangles.push(match v.chain {
+                        SweepLineChain::Bottom => [v.vertex_index, a.vertex_index, b.vertex_index],
+                        SweepLineChain::Top => [v.vertex_index, b.vertex_index, a.vertex_index],
+                    });
                 }
-                prev = curr;
-            }
-            stack.clear();
-            stack.push(top_idx);
-            stack.push(v);
-        } else {
-            // Same chain: form triangles while winding is positive
-            loop {
-                if stack.len() < 2 {
-                    break;
-                }
+                // Stack is now empty
+                // Push T back onto the stack, then push V to the stack
+                stack.push(top);
+                stack.push(v);
+            } else {
+                // Same chain: form triangles while winding is positive
+                let a = loop {
+                    // Pop a vertex A from the stack
+                    // Peek a second vertex B from the stack. If this fails, the stack is empty and we are done.
+                    // If V is on the Bottom chain, form triangle V - B - A
+                    // If V is on the Top chain, form triangle V - A - B
+                    // If this triangle has positive winding (using `sin_cmp`) then output it.
+                    // If this triangle has zero or negative winding, then break out of the loop
+                    // After looping, push A back onto the stack, then push V on to the stack
 
-                let a = stack.pop().unwrap();
-                let b = *stack.last().unwrap();
+                    // Pop a vertex A from the stack
+                    let a = stack.pop().unwrap();
 
-                let triangle = if v_chain == SweepLineChain::Bottom {
-                    [v, b, a]
-                } else {
-                    [v, a, b]
+                    // Peek a second vertex B from the stack. If this fails, the stack is empty and we are done.
+                    let Some(b) = stack.last() else {
+                        break a;
+                    };
+
+                    let triangle = match v.chain {
+                        SweepLineChain::Bottom => [v.vertex_index, b.vertex_index, a.vertex_index],
+                        SweepLineChain::Top => [v.vertex_index, a.vertex_index, b.vertex_index],
+                    };
+
+                    // We might not be able to form all triangles
+                    match vertices[triangle[0] as usize].sin_cmp(
+                        &vertices[triangle[1] as usize],
+                        &vertices[triangle[2] as usize],
+                    ) {
+                        Ordering::Greater => {
+                            // Triangle OK -- output it
+                            triangles.push(triangle);
+                        }
+                        Ordering::Less | Ordering::Equal => {
+                            // Triangle invalid -- stop iteration
+                            break a;
+                        }
+                    }
                 };
-
-                // Check winding
-                let v_pt = &vertices[v as usize];
-                let a_pt = &vertices[triangle[1] as usize];
-                let b_pt = &vertices[triangle[2] as usize];
-
-                if v_pt.sin_cmp(a_pt, b_pt) == Ordering::Greater {
-                    triangles.push(triangle);
-                } else {
-                    stack.push(a);
-                    break;
-                }
+                stack.push(a);
+                stack.push(v);
             }
-            stack.push(v);
+        }
+
+        if stack.len() != 2 {
+            panic!("Finished triangulating with wrong number of vertices leftover");
         }
     }
 
