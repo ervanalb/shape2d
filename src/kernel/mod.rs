@@ -8,7 +8,8 @@ pub trait Kernel: Sized {
     type Extents;
     type Intersection;
     type SweepLineEdgeSegment: Copy + PartialEq;
-    type SweepLineEventPoint;
+    type SweepLineEventPoint: Copy + PartialEq;
+    type TriangleVertex: TriangleVertex;
 
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
@@ -80,9 +81,40 @@ pub trait Kernel: Sized {
         &self,
         edge: Self::Edge,
         segment: Self::SweepLineEdgeSegment,
-        chain: SweepLineEdgeSegmentChain,
-        event_point: &Self::SweepLineEventPoint,
+        chain: SweepLineChain,
+        event_point: Self::SweepLineEventPoint,
     ) -> Ordering;
+
+    // Triangulation methods
+    fn sweep_line_event_point_to_triangle_vertex(
+        &self,
+        event_point: Self::SweepLineEventPoint,
+    ) -> Self::TriangleVertex;
+
+    fn sweep_line_edge_segment_to_triangle_vertices(
+        &self,
+        edge: Self::Edge,
+        segment: Self::SweepLineEdgeSegment,
+        chain: SweepLineChain,
+    ) -> impl Iterator<Item = Self::TriangleVertex>;
+
+    fn sweep_line_event_cmp_clockwise(
+        &self,
+        a: &SweepLineEvent<Self>,
+        b: &SweepLineEvent<Self>,
+    ) -> Ordering;
+}
+
+pub trait TriangleVertex: Copy {
+    /// Compare vertices in sweep-line order (left-to-right, bottom-to-top)
+    fn sweep_line_cmp(&self, other: &Self) -> Ordering;
+
+    /// Compare the angular order of vectors from self to a and self to b
+    /// Returns the sign of the cross product: (a - self) x (b - self)
+    /// Greater = b is counterclockwise from a (positive cross product)
+    /// Equal = collinear (zero cross product)
+    /// Less = b is clockwise from a (negative cross product)
+    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering;
 }
 
 pub trait Edge: Copy + Ord {
@@ -124,7 +156,7 @@ pub struct SweepLineEvent<G: Kernel> {
     /// The vertex index where this event occurs
     pub segment: G::SweepLineEdgeSegment,
     /// Whether this segment is the top or bottom of an enclosed area
-    pub chain: SweepLineEdgeSegmentChain,
+    pub chain: SweepLineChain,
 }
 
 impl<T: Copy> Iterator for Few<T> {
@@ -151,7 +183,7 @@ impl Edge for (u32, u32) {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SweepLineEdgeSegmentChain {
+pub enum SweepLineChain {
     Bottom, // Bottom edges go from left-to-right
     Top,    // Top edges go from right-to-left
 }

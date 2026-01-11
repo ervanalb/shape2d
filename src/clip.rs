@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, btree_map::Entry},
 };
 
-use crate::kernel::{Edge, Kernel, SweepLineEdgeSegmentChain, SweepLineEvent, SweepLineEventType};
+use crate::kernel::{Edge, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
 
 /// Edge direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -20,7 +20,7 @@ struct StatusEntry<K: Kernel> {
     /// The active segment
     segment: K::SweepLineEdgeSegment,
     /// Whether this is a top or bottom edge
-    chain: SweepLineEdgeSegmentChain,
+    chain: SweepLineChain,
     /// The winding number above this segment
     winding_above: i32,
 }
@@ -85,7 +85,7 @@ fn sweep_line<K: Kernel>(
                         status_entry.edge,
                         status_entry.segment,
                         status_entry.chain,
-                        &event_point,
+                        event_point,
                     );
                     // We are looking for this point
                     // Less -|- Equal -|- Greater
@@ -134,7 +134,7 @@ fn sweep_line<K: Kernel>(
                         status_entry.edge,
                         status_entry.segment,
                         status_entry.chain,
-                        &event_point,
+                        event_point,
                     );
                     // We are looking for this point
                     // Less -|- Equal -|- Greater
@@ -151,8 +151,8 @@ fn sweep_line<K: Kernel>(
 
                 let winding_above = winding_below
                     + match event.chain {
-                        SweepLineEdgeSegmentChain::Bottom => 1,
-                        SweepLineEdgeSegmentChain::Top => -1,
+                        SweepLineChain::Bottom => 1,
+                        SweepLineChain::Top => -1,
                     };
 
                 // Insert into status
