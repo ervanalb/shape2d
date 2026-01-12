@@ -591,6 +591,8 @@ fn handle_merge_vertex<G: Kernel>(
             SweepLineChain::Top,
         );
 
+        // TODO consider to remove this conditional
+        // if we switch to late merge emission
         if helper_h_vertex != vertex_index {
             // Output V with index J, chain Top (component end vertex)
             monotone_events.push(dbg!(MonotoneEvent {
@@ -612,11 +614,13 @@ fn handle_merge_vertex<G: Kernel>(
     }
 
     // (both cases) Output V with index I, chain Top
-    monotone_events.push(dbg!(MonotoneEvent {
-        vertex_index,
-        monotone_component: component_i,
-        chain: SweepLineChain::Top,
-    }));
+    if helper_h_vertex != vertex_index {
+        monotone_events.push(dbg!(MonotoneEvent {
+            vertex_index,
+            monotone_component: component_i,
+            chain: SweepLineChain::Top,
+        }));
+    }
 
     // Output upper segment with index I2, chain Bottom
     output_edge_segment(
@@ -643,6 +647,7 @@ fn handle_merge_vertex<G: Kernel>(
         }
 
         // Output V with index J2, chain Bottom
+        // TODO: maybe defer emitting this since it might be an end node (chain top)
         monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component_j2,
@@ -656,6 +661,7 @@ fn handle_merge_vertex<G: Kernel>(
         };
     } else {
         // Output V with index I2, chain Bottom
+        // TODO: maybe defer emitting this since it might be an end node (chain top)
         monotone_events.push(dbg!(MonotoneEvent {
             vertex_index,
             monotone_component: component_i2,
