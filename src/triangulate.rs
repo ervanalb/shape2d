@@ -560,12 +560,10 @@ fn handle_merge_vertex<G: Kernel>(
     // Search status & remove upper segment, noting its index I2 and helper H2
     println!("Status is {:?}", status);
     println!("Find and remove upper segment: {:?}", upper_event.segment);
-    let upper_segment = status.remove(geometry, pt, &upper_event.segment);
-    let segment_below = status
-        .get_below_mut(geometry, pt)
-        .expect("No segment below");
+    let (segment_below, upper_segment) =
+        status.get_below_mut_and_remove(geometry, pt, &upper_event.segment);
+    let segment_below = segment_below.expect("No segment below");
     println!("Segment below is {:?}", segment_below);
-    // Note: Can't print status here while segment_below is borrowed
 
     // Handle lower segment
     println!("Handling segment below");

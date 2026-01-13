@@ -175,7 +175,7 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
 
     /// Get a reference to the segment equal or below the given event point
     /// Returns None if there is no segment below.
-    pub fn get_equal_or_below(
+    pub fn get_below(
         &self,
         geometry: &G,
         event_point: G::SweepLineEventPoint,
@@ -203,7 +203,7 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
     ) -> Option<&mut SweepLineStatusEntry<G, T>> {
         let pos = self.entries.partition_point(|entry| {
             let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
-            matches!(ord, Ordering::Less)
+            matches!(ord, Ordering::Less | Ordering::Equal)
         });
 
         if pos == 0 {
@@ -211,6 +211,31 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
         } else {
             Some(&mut self.entries[pos - 1])
         }
+    }
+
+    /// Remove a segment from the status and return it,
+    /// along a reference to the segment below it
+    ///
+    /// Panics if the segment is not found.
+    pub fn get_below_mut_and_remove(
+        &mut self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+        target_segment: &SweepLineSegment<G>,
+    ) -> (
+        Option<&mut SweepLineStatusEntry<G, T>>,
+        SweepLineStatusEntry<G, T>,
+    ) {
+        let i = self
+            .search(geometry, event_point, target_segment)
+            .expect("Segment not found in status");
+        let removed = self.entries.remove(i);
+        let below = if i > 0 {
+            Some(&mut self.entries[i - 1])
+        } else {
+            None
+        };
+        (below, removed)
     }
 
     /// Insert a new entry at the appropriate position for the given event point

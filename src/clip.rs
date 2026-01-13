@@ -80,7 +80,7 @@ fn sweep_line<K: Kernel>(
 
                 // Calculate winding number
                 let winding_below = status
-                    .get_equal_or_below(geometry, event_point)
+                    .get_below(geometry, event_point)
                     .map(|entry| entry.data.winding_above)
                     .unwrap_or(0);
 
