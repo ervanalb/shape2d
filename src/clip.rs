@@ -91,7 +91,7 @@ fn sweep_line<K: Kernel>(
                     };
 
                 // Insert into status
-                status.insert_back(
+                status.insert(
                     geometry,
                     event_point,
                     SweepLineStatusEntry::new(event.segment, StatusData { winding_above }),

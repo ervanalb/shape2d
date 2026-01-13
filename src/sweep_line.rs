@@ -226,7 +226,7 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
     /// behind any entries that are equal.
     /// Used to maintain proper status ordering
     /// when processing events in sweep-line order.
-    pub fn insert_back(
+    pub fn insert(
         &mut self,
         geometry: &G,
         event_point: G::SweepLineEventPoint,
