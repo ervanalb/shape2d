@@ -540,8 +540,6 @@ mod tests {
         let results: Vec<u32> = tree.search(&test_rect_a).collect();
         assert_eq!(results, vec![10]);
 
-        dbg!(&tree);
-
         // Check that rect B is found
         let results: Vec<u32> = tree.search(&test_rect_b).collect();
         assert_eq!(results, vec![10]);

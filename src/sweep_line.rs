@@ -134,30 +134,6 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
         }
     }
 
-    fn search(
-        &self,
-        geometry: &G,
-        event_point: G::SweepLineEventPoint,
-        target_segment: &SweepLineSegment<G>,
-    ) -> Option<usize> {
-        let start_i = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
-            matches!(ord, Ordering::Less)
-        });
-        let end_i = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
-            matches!(ord, Ordering::Less | Ordering::Equal)
-        });
-
-        // Linear search over all equal segments
-        for i in start_i..end_i {
-            if &self.entries[i].segment == target_segment {
-                return Some(i);
-            }
-        }
-        None
-    }
-
     /// Remove a segment from the status and return it
     ///
     /// Panics if the segment is not found.
@@ -167,10 +143,15 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
     ) -> SweepLineStatusEntry<G, T> {
-        let i = self
-            .search(geometry, event_point, target_segment)
-            .expect("Segment not found in status");
-        return self.entries.remove(i);
+        let i = self.entries.partition_point(|entry| {
+            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            matches!(ord, Ordering::Less)
+        });
+
+        let removed = self.entries.remove(i);
+        assert_eq!(target_segment, &removed.segment);
+
+        return removed;
     }
 
     /// Get a reference to the segment equal or below the given event point
@@ -226,10 +207,13 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
         Option<&mut SweepLineStatusEntry<G, T>>,
         SweepLineStatusEntry<G, T>,
     ) {
-        let i = self
-            .search(geometry, event_point, target_segment)
-            .expect("Segment not found in status");
+        let i = self.entries.partition_point(|entry| {
+            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            matches!(ord, Ordering::Less)
+        });
+
         let removed = self.entries.remove(i);
+        assert_eq!(target_segment, &removed.segment);
         let below = if i > 0 {
             Some(&mut self.entries[i - 1])
         } else {
@@ -239,7 +223,9 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
     }
 
     /// Insert a new entry at the appropriate position for the given event point
-    /// behind any entries that are equal
+    /// behind any entries that are equal.
+    /// Used to maintain proper status ordering
+    /// when processing events in sweep-line order.
     pub fn insert_back(
         &mut self,
         geometry: &G,
@@ -254,7 +240,10 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
     }
 
     /// Insert a new entry at the appropriate position for the given event point
-    /// in front of any entries that are equal
+    /// in front of any entries that are equal.
+    /// Used to maintain proper status ordering
+    /// when processing events in reverse sweep-line order
+    /// (e.g. start events sorted clockwise)
     pub fn insert_front(
         &mut self,
         geometry: &G,
