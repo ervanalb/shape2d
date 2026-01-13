@@ -1211,6 +1211,36 @@ mod tests {
     }
 
     #[test]
+    fn test_start_split_vertex() {
+        //   3-2
+        //   //
+        //   4
+        //   \\
+        //   0-1
+        //
+        // Classifications:
+        // 4 = start
+        // 4 = split
+        // 0 = bottom
+        // 3 = top
+        // 1 = end
+        // 2 = end
+        let mut kernel = Kernel::new(vec![
+            [1.0, 0.0], // 0
+            [2.0, 0.0], // 1
+            [2.0, 2.0], // 2
+            [1.0, 2.0], // 3
+            [0.0, 1.0], // 4
+        ]);
+        let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2,);
+    }
+
+    #[test]
     fn test_merge_vertex() {
         // Polygon with a merge vertex (concave pointing right)
         // Creates a notch that merges monotone regions
@@ -1241,7 +1271,37 @@ mod tests {
     }
 
     #[test]
-    fn test_split_and_merge() {
+    fn test_merge_end_vertex() {
+        //   3-2
+        //    \\
+        //     4
+        //    //
+        //   0-1
+        //
+        // Classifications:
+        // 0 = start
+        // 3 = start
+        // 1 = bottom
+        // 2 = top
+        // 4 = merge
+        // 4 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 0.0], // 0
+            [1.0, 0.0], // 1
+            [1.0, 2.0], // 2
+            [0.0, 2.0], // 3
+            [2.0, 1.0], // 4
+        ]);
+        let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2,);
+    }
+
+    #[test]
+    fn test_split_then_merge() {
         // 4------3
         //  \    /
         //   5  2
@@ -1272,7 +1332,37 @@ mod tests {
     }
 
     #[test]
-    fn test_split_top_bottom() {
+    fn test_split_merge() {
+        // 3---2
+        //  \ /
+        //   4
+        //  / \
+        // 0---1
+        //
+        // Classifications:
+        // 0 = start
+        // 3 = start
+        // 4 = merge
+        // 4 = split
+        // 1 = end
+        // 2 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 0.0], // 0
+            [2.0, 0.0], // 1
+            [2.0, 2.0], // 2
+            [0.0, 2.0], // 3
+            [1.0, 1.0], // 4
+        ]);
+        let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 2,);
+    }
+
+    #[test]
+    fn test_split_and_top_and_bottom() {
         // This tests splitting with a top helper & bottom helper
         //
         //     /-6
@@ -1320,6 +1410,56 @@ mod tests {
     }
 
     #[test]
+    fn test_split_top_and_split_bottom() {
+        // This tests splitting with a coincident top helper & coincident bottom helper
+        //
+        //    7-6
+        //    //
+        //   5-----4
+        //  /     /
+        // 0-----1
+        //        \\
+        //        2-3
+        //
+        // Classifications:
+        // 0 = start
+        // 7 = top
+        // 5 = split (helper=7)
+        // 1 = bottom
+        // 6 = end
+        // 3 = split (helper=1)
+        // 2 = end
+        // 4 = end
+        let mut kernel = Kernel::new(vec![
+            [0.0, 1.0], // 0
+            [4.0, 1.0], // 1
+            [5.0, 0.0], // 2
+            [6.0, 0.0], // 3
+            [5.0, 2.0], // 4
+            [1.0, 2.0], // 5
+            [3.0, 3.0], // 6
+            [2.0, 3.0], // 7
+        ]);
+        let edges = vec![
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 1),
+            (1, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 5),
+            (5, 0),
+        ];
+
+        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter());
+
+        verify_triangulation(&vertices, &triangles);
+        assert_eq!(triangles.len(), 4);
+    }
+
+    #[test]
     fn test_combs() {
         // 6--\
         // |   5
@@ -1348,11 +1488,10 @@ mod tests {
         let down_comb = right_comb.map(|[x, y]| [y, -x]);
 
         for (desc, comb) in [
-            //("right", right_comb),
-            //("up", up_comb),
+            ("right", right_comb),
+            ("up", up_comb),
             ("left", left_comb),
-            //("down", down_comb),
-            //XXX
+            ("down", down_comb),
         ] {
             eprintln!("Testing comb: {}", desc);
             let mut kernel = Kernel::new(comb.to_vec());
@@ -1361,6 +1500,62 @@ mod tests {
 
             verify_triangulation(&vertices, &triangles);
             assert_eq!(triangles.len(), 5);
+        }
+    }
+
+    #[test]
+    fn test_degenerate_combs() {
+        // 6
+        // |\
+        // | 5
+        // |/
+        // 4
+        // |\
+        // | 3
+        // |/
+        // 2
+        // |\
+        // | 1
+        // |/
+        // 0
+        let right_comb = [
+            [0.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 2.0],
+            [1.0, 3.0],
+            [0.0, 4.0],
+            [1.0, 5.0],
+            [0.0, 6.0],
+        ];
+        let edges = vec![
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 4),
+            (4, 2),
+            (2, 0),
+        ];
+
+        let up_comb = right_comb.map(|[x, y]| [-y, x]);
+        let left_comb = right_comb.map(|[x, y]| [-x, -y]);
+        let down_comb = right_comb.map(|[x, y]| [y, -x]);
+
+        for (desc, comb) in [
+            ("right", right_comb),
+            ("up", up_comb),
+            ("left", left_comb),
+            ("down", down_comb),
+        ] {
+            eprintln!("Testing degenerate comb: {}", desc);
+            let mut kernel = Kernel::new(comb.to_vec());
+
+            let (vertices, triangles) = triangulate(&mut kernel, edges.iter().copied());
+
+            verify_triangulation(&vertices, &triangles);
+            assert_eq!(triangles.len(), 3);
         }
     }
 
