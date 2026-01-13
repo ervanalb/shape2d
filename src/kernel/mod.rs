@@ -3,12 +3,15 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 pub mod polyline;
 
+// Re-export sweep-line types for convenience
+pub use crate::sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment};
+
 pub trait Kernel: Sized {
     type Vertex: Copy + Ord + Debug;
     type Edge: Edge;
     type Extents;
     type Intersection;
-    type SweepLineEdgeSegment: Copy + PartialEq + Debug;
+    type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleVertex: TriangleVertex;
 
@@ -80,9 +83,7 @@ pub trait Kernel: Sized {
 
     fn sweep_line_segment_cmp(
         &self,
-        edge: Self::Edge,
-        segment: Self::SweepLineEdgeSegment,
-        chain: SweepLineChain,
+        segment: &SweepLineSegment<Self>,
         event_point: Self::SweepLineEventPoint,
     ) -> Ordering;
 
@@ -94,9 +95,7 @@ pub trait Kernel: Sized {
 
     fn sweep_line_edge_segment_to_triangle_vertices(
         &self,
-        edge: Self::Edge,
-        segment: Self::SweepLineEdgeSegment,
-        chain: SweepLineChain,
+        segment: &SweepLineSegment<Self>,
     ) -> impl Iterator<Item = Self::TriangleVertex>;
 
     fn sweep_line_event_cmp_clockwise(
@@ -131,35 +130,6 @@ pub enum Few<T> {
     Two(T, T),
 }
 
-/// Event type in the sweep line algorithm
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SweepLineEventType {
-    End, // End comes before Start in sorting
-    Start,
-}
-
-impl SweepLineEventType {
-    pub fn other(self) -> Self {
-        match self {
-            SweepLineEventType::End => SweepLineEventType::Start,
-            SweepLineEventType::Start => SweepLineEventType::End,
-        }
-    }
-}
-
-/// An event in the sweep line algorithm
-#[derive(Debug, Clone)]
-pub struct SweepLineEvent<G: Kernel> {
-    /// The type of event (start or end)
-    pub event_type: SweepLineEventType,
-    /// The edge containing this segment
-    pub edge: G::Edge,
-    /// The vertex index where this event occurs
-    pub segment: G::SweepLineEdgeSegment,
-    /// Whether this segment is the top or bottom of an enclosed area
-    pub chain: SweepLineChain,
-}
-
 impl<T: Copy> Iterator for Few<T> {
     type Item = T;
 
@@ -181,10 +151,4 @@ impl Edge for (u32, u32) {
     fn reversed(self) -> Self {
         (self.1, self.0)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum SweepLineChain {
-    Bottom, // Bottom edges go from left-to-right
-    Top,    // Top edges go from right-to-left
 }

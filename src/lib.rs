@@ -1,5 +1,6 @@
 mod clean;
 mod clip;
+mod sweep_line;
 mod triangulate;
 pub mod kernel;
 pub mod rtree;

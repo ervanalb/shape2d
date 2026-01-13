@@ -1,9 +1,7 @@
-use std::{
-    cmp::Ordering,
-    collections::{BTreeMap, btree_map::Entry},
-};
+use std::collections::{BTreeMap, btree_map::Entry};
 
-use crate::kernel::{Edge, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
+use crate::kernel::{Edge, Kernel, SweepLineEvent, SweepLineEventType};
+use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
 
 /// Edge direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,15 +10,9 @@ enum Direction {
     Reverse,
 }
 
-/// An entry in the status structure
+/// Algorithm-specific data for status entries in clipping
 #[derive(Debug, Clone)]
-struct StatusEntry<K: Kernel> {
-    /// The active edge
-    edge: K::Edge,
-    /// The active segment
-    segment: K::SweepLineEdgeSegment,
-    /// Whether this is a top or bottom edge
-    chain: SweepLineChain,
+struct StatusData {
     /// The winding number above this segment
     winding_above: i32,
 }
@@ -72,7 +64,7 @@ fn sweep_line<K: Kernel>(
     events: Vec<SweepLineEvent<K>>,
     winding_rule: impl Fn(i32) -> bool,
 ) -> Vec<K::Edge> {
-    let mut status: Vec<StatusEntry<K>> = Vec::new();
+    let mut status = SweepLineStatus::<K, StatusData>::new();
     let mut output: BTreeMap<K::Edge, Option<Direction>> = BTreeMap::new();
 
     for event in events.iter() {
@@ -80,95 +72,37 @@ fn sweep_line<K: Kernel>(
             SweepLineEventType::End => {
                 // Find and remove the edge from status
                 let event_point = geometry.sweep_line_event_point(event);
-                let pos = status.partition_point(|status_entry| {
-                    let ord = geometry.sweep_line_segment_cmp(
-                        status_entry.edge,
-                        status_entry.segment,
-                        status_entry.chain,
-                        event_point,
-                    );
-                    // We are looking for this point
-                    // Less -|- Equal -|- Greater
-                    //        ^
-                    matches!(ord, Ordering::Less)
-                });
-
-                // Linear search around pos to find the matching edge
-                let mut found_at = None;
-
-                // Search forward from pos
-                for i in pos..status.len() {
-                    let entry = &status[i];
-
-                    if entry.edge == event.edge && entry.segment == event.segment {
-                        found_at = Some(i);
-                        break;
-                    }
-                }
-
-                // If not found forward, search backward from pos
-                if found_at.is_none() {
-                    for i in (0..pos).rev() {
-                        let entry = &status[i];
-
-                        if entry.edge == event.edge && entry.segment == event.segment {
-                            found_at = Some(i);
-                            break;
-                        }
-                    }
-                }
-
-                let found_at = found_at.expect("Previously inserted edge not found in status");
-
-                if found_at != pos {
-                    eprintln!("Warning: Edge removal required linear search (dirty input?)");
-                }
-                status.remove(found_at);
+                let pos = status.find_entry(geometry, event_point, &event.segment);
+                status.remove(pos);
             }
             SweepLineEventType::Start => {
                 // Find insertion point in status
                 let event_point = geometry.sweep_line_event_point(event);
 
-                let pos = status.partition_point(|status_entry| {
-                    let ord = geometry.sweep_line_segment_cmp(
-                        status_entry.edge,
-                        status_entry.segment,
-                        status_entry.chain,
-                        event_point,
-                    );
-                    // We are looking for this point
-                    // Less -|- Equal -|- Greater
-                    //                    ^
-                    matches!(ord, Ordering::Less | Ordering::Equal)
-                });
+                let pos = status.find_insertion_point(geometry, event_point);
 
                 // Calculate winding number
                 let winding_below = if pos > 0 {
-                    status[pos - 1].winding_above
+                    status[pos - 1].data.winding_above
                 } else {
                     0
                 };
 
                 let winding_above = winding_below
-                    + match event.chain {
-                        SweepLineChain::Bottom => 1,
-                        SweepLineChain::Top => -1,
+                    + match event.segment.chain {
+                        crate::kernel::SweepLineChain::Bottom => 1,
+                        crate::kernel::SweepLineChain::Top => -1,
                     };
 
                 // Insert into status
                 status.insert(
                     pos,
-                    StatusEntry {
-                        edge: event.edge,
-                        segment: event.segment,
-                        chain: event.chain,
-                        winding_above,
-                    },
+                    SweepLineStatusEntry::new(event.segment, StatusData { winding_above }),
                 );
 
                 // Determine if we should emit this edge
                 // and in which direction
-                if let Entry::Vacant(e) = output.entry(event.edge) {
+                if let Entry::Vacant(e) = output.entry(event.segment.edge) {
                     let below_inside = winding_rule(winding_below);
                     let above_inside = winding_rule(winding_above);
 

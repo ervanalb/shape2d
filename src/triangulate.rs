@@ -1,6 +1,9 @@
 use std::cmp::Ordering;
 
-use crate::kernel::{Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, TriangleVertex};
+use crate::kernel::{
+    Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, TriangleVertex,
+};
+use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
 
 /// Main triangulation function
 ///
@@ -39,12 +42,9 @@ enum HelperType {
 
 type MonotoneComponentIndex = u32;
 
-/// An entry in the status structure for stage 1 (partitioning into monotone components)
+/// Algorithm-specific data for status entries in stage 1 (partitioning into monotone components)
 #[derive(Debug, Clone)]
-struct StatusEntry<G: Kernel> {
-    edge: G::Edge,
-    segment: G::SweepLineEdgeSegment,
-    chain: SweepLineChain,
+struct StatusData {
     component: MonotoneComponentIndex,
     helper_vertex: u32,
     helper_type: HelperType,
@@ -98,7 +98,7 @@ fn partition_into_monotone<G: Kernel>(
 ) -> (Vec<G::TriangleVertex>, Vec<MonotoneEvent>) {
     let mut vertices = IndexedList::new();
     let mut monotone_events = Vec::new();
-    let mut status: Vec<StatusEntry<G>> = Vec::new();
+    let mut status = SweepLineStatus::<G, StatusData>::new();
     let mut component_allocator = MonotoneComponentAllocator::new();
 
     // Build event queue with events that share a vertex sorted clockwise
@@ -149,16 +149,16 @@ fn process_event_pair<G: Kernel>(
     event_b: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) {
     // Categorize the vertex based on the event pair
 
     match (
         event_a.event_type,
-        event_a.chain,
+        event_a.segment.chain,
         event_b.event_type,
-        event_b.chain,
+        event_b.segment.chain,
     ) {
         (
             SweepLineEventType::Start,
@@ -291,7 +291,7 @@ fn handle_start_vertex<G: Kernel>(
     lower_event: &SweepLineEvent<G>,
     _vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) {
     let component = component_allocator.allocate();
@@ -304,18 +304,18 @@ fn handle_start_vertex<G: Kernel>(
     }));
 
     // Insert lower segment into status
-    let pos = find_insertion_point(geometry, status, pt);
+    let pos = status.find_insertion_point(geometry, pt);
 
     status.insert(
         pos,
-        StatusEntry {
-            edge: lower_event.edge,
-            segment: lower_event.segment,
-            chain: lower_event.chain,
-            component,
-            helper_vertex: vertex,
-            helper_type: HelperType::Top,
-        },
+        SweepLineStatusEntry::new(
+            lower_event.segment,
+            StatusData {
+                component,
+                helper_vertex: vertex,
+                helper_type: HelperType::Top,
+            },
+        ),
     );
 }
 
@@ -328,10 +328,10 @@ fn handle_end_vertex<G: Kernel>(
     upper_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
 ) {
     // Search status & remove lower segment, noting helper H & component index I
-    let pos = find_status_entry(geometry, status, pt, lower_event.edge, lower_event.segment);
+    let pos = status.find_entry(geometry, pt, &lower_event.segment);
     let segment_below = status.remove(pos);
 
     // Output lower segment with index I, chain Bottom
@@ -340,24 +340,24 @@ fn handle_end_vertex<G: Kernel>(
         lower_event,
         vertices,
         monotone_events,
-        segment_below.component,
+        segment_below.data.component,
         SweepLineChain::Bottom,
     );
 
     // Output V with index I, chain Top (component end vertex)
     monotone_events.push(dbg!(MonotoneEvent {
         vertex,
-        component: segment_below.component,
+        component: segment_below.data.component,
         chain: SweepLineChain::Top,
     }));
 
     // Check if helper was a merge vertex
-    if let HelperType::Merge { upper_component } = segment_below.helper_type {
+    if let HelperType::Merge { upper_component } = segment_below.data.helper_type {
         // Output H with index J, chain Bottom
         // (deferred)
-        if segment_below.helper_vertex != vertex {
+        if segment_below.data.helper_vertex != vertex {
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: segment_below.helper_vertex,
+                vertex: segment_below.data.helper_vertex,
                 component: upper_component,
                 chain: SweepLineChain::Bottom,
             }));
@@ -386,7 +386,7 @@ fn handle_end_vertex<G: Kernel>(
             upper_event,
             vertices,
             monotone_events,
-            segment_below.component,
+            segment_below.data.component,
             SweepLineChain::Top,
         );
     }
@@ -401,20 +401,20 @@ fn handle_split_vertex<G: Kernel>(
     _lower_event: &SweepLineEvent<G>,
     _vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) {
     // Search status to find segment directly below this vertex, noting its index I and helper H
-    let i = find_status_below(geometry, status, pt);
+    let i = status.find_below(geometry, pt);
     let segment_below = &mut status[i];
 
-    match segment_below.helper_type {
+    match segment_below.data.helper_type {
         HelperType::Merge { upper_component } => {
-            if segment_below.helper_vertex != vertex {
+            if segment_below.data.helper_vertex != vertex {
                 // Output H with index J, chain Bottom
                 // (deferred)
                 monotone_events.push(dbg!(MonotoneEvent {
-                    vertex: segment_below.helper_vertex,
+                    vertex: segment_below.data.helper_vertex,
                     component: upper_component,
                     chain: SweepLineChain::Bottom,
                 }));
@@ -427,30 +427,30 @@ fn handle_split_vertex<G: Kernel>(
             }));
 
             // Output V with index I, chain Top
-            if segment_below.helper_vertex != vertex {
+            if segment_below.data.helper_vertex != vertex {
                 monotone_events.push(dbg!(MonotoneEvent {
                     vertex,
-                    component: segment_below.component,
+                    component: segment_below.data.component,
                     chain: SweepLineChain::Top,
                 }));
             }
 
             // Edit the status to replace the existing helper H with V and set the helper type to Top
-            segment_below.helper_vertex = vertex;
-            segment_below.helper_type = HelperType::Top;
+            segment_below.data.helper_vertex = vertex;
+            segment_below.data.helper_type = HelperType::Top;
 
             // Insert upper segment into status with index J, helper V, helper type Bottom
-            let pos = find_insertion_point(geometry, status, pt);
+            let pos = status.find_insertion_point(geometry, pt);
             status.insert(
                 pos,
-                StatusEntry {
-                    edge: upper_event.edge,
-                    segment: upper_event.segment,
-                    chain: upper_event.chain,
-                    component: upper_component,
-                    helper_vertex: vertex,
-                    helper_type: HelperType::Bottom,
-                },
+                SweepLineStatusEntry::new(
+                    upper_event.segment,
+                    StatusData {
+                        component: upper_component,
+                        helper_vertex: vertex,
+                        helper_type: HelperType::Bottom,
+                    },
+                ),
             );
         }
         HelperType::Bottom => {
@@ -459,12 +459,12 @@ fn handle_split_vertex<G: Kernel>(
 
             // Output H with index J, chain Bottom (component start vertex)
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: segment_below.helper_vertex,
+                vertex: segment_below.data.helper_vertex,
                 component: new_component,
                 chain: SweepLineChain::Bottom,
             }));
 
-            if segment_below.helper_vertex != vertex {
+            if segment_below.data.helper_vertex != vertex {
                 // Output V with index J, chain Top
                 monotone_events.push(dbg!(MonotoneEvent {
                     vertex,
@@ -475,30 +475,30 @@ fn handle_split_vertex<G: Kernel>(
                 // Output V with index I, chain Bottom
                 monotone_events.push(dbg!(MonotoneEvent {
                     vertex,
-                    component: segment_below.component,
+                    component: segment_below.data.component,
                     chain: SweepLineChain::Bottom,
                 }));
             }
 
             // Edit status to replace existing index I with J
             // Edit status to replace existing helper H with V and set helper type to Top
-            let segment_below_original_component = segment_below.component;
-            segment_below.component = new_component;
-            segment_below.helper_vertex = vertex;
-            segment_below.helper_type = HelperType::Top;
+            let segment_below_original_component = segment_below.data.component;
+            segment_below.data.component = new_component;
+            segment_below.data.helper_vertex = vertex;
+            segment_below.data.helper_type = HelperType::Top;
 
             // Insert upper segment into status with index I, helper V, helper type Bottom
-            let pos = find_insertion_point(geometry, status, pt);
+            let pos = status.find_insertion_point(geometry, pt);
             status.insert(
                 pos,
-                StatusEntry {
-                    edge: upper_event.edge,
-                    segment: upper_event.segment,
-                    chain: upper_event.chain,
-                    component: segment_below_original_component,
-                    helper_vertex: vertex,
-                    helper_type: HelperType::Bottom,
-                },
+                SweepLineStatusEntry::new(
+                    upper_event.segment,
+                    StatusData {
+                        component: segment_below_original_component,
+                        helper_vertex: vertex,
+                        helper_type: HelperType::Bottom,
+                    },
+                ),
             );
         }
         HelperType::Top => {
@@ -507,12 +507,12 @@ fn handle_split_vertex<G: Kernel>(
 
             // Output H with index J, chain Bottom (component start vertex)
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: segment_below.helper_vertex,
+                vertex: segment_below.data.helper_vertex,
                 component: new_component,
                 chain: SweepLineChain::Bottom,
             }));
 
-            if segment_below.helper_vertex != vertex {
+            if segment_below.data.helper_vertex != vertex {
                 // Output V with index J, chain Bottom
                 monotone_events.push(dbg!(MonotoneEvent {
                     vertex,
@@ -523,27 +523,27 @@ fn handle_split_vertex<G: Kernel>(
                 // Output V with index I, chain Top
                 monotone_events.push(dbg!(MonotoneEvent {
                     vertex,
-                    component: segment_below.component,
+                    component: segment_below.data.component,
                     chain: SweepLineChain::Top,
                 }));
             }
 
             // Edit status to replace existing helper H with V and set helper type to Top
-            segment_below.helper_vertex = vertex;
-            segment_below.helper_type = HelperType::Top;
+            segment_below.data.helper_vertex = vertex;
+            segment_below.data.helper_type = HelperType::Top;
 
             // Insert upper segment into status with index J, helper V, helper type Bottom
-            let pos = find_insertion_point(geometry, status, pt);
+            let pos = status.find_insertion_point(geometry, pt);
             status.insert(
                 pos,
-                StatusEntry {
-                    edge: upper_event.edge,
-                    segment: upper_event.segment,
-                    chain: upper_event.chain,
-                    component: new_component,
-                    helper_vertex: vertex,
-                    helper_type: HelperType::Bottom,
-                },
+                SweepLineStatusEntry::new(
+                    upper_event.segment,
+                    StatusData {
+                        component: new_component,
+                        helper_vertex: vertex,
+                        helper_type: HelperType::Bottom,
+                    },
+                ),
             );
         }
     }
@@ -558,27 +558,27 @@ fn handle_merge_vertex<G: Kernel>(
     upper_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
 ) {
     // Search status & remove upper segment, noting its index I2 and helper H2
-    let pos = find_status_entry(geometry, status, pt, upper_event.edge, upper_event.segment);
+    let pos = status.find_entry(geometry, pt, &upper_event.segment);
     let upper_segment = status.remove(pos);
 
     // Search status to find segment directly below this vertex, noting its index I and helper H
-    let i = find_status_below(geometry, status, pt);
+    let i = status.find_below(geometry, pt);
     let segment_below = &mut status[i];
 
     // Handle lower segment
     println!("Handling segment below");
     if let HelperType::Merge {
         upper_component: segment_below_helper_upper_component,
-    } = segment_below.helper_type
+    } = segment_below.data.helper_type
     {
         // Output H with index J, chain Bottom
         // (deferred)
-        if segment_below.helper_vertex != vertex {
+        if segment_below.data.helper_vertex != vertex {
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: segment_below.helper_vertex,
+                vertex: segment_below.data.helper_vertex,
                 component: segment_below_helper_upper_component,
                 chain: SweepLineChain::Bottom,
             }));
@@ -607,16 +607,16 @@ fn handle_merge_vertex<G: Kernel>(
             lower_event,
             vertices,
             monotone_events,
-            segment_below.component,
+            segment_below.data.component,
             SweepLineChain::Top,
         );
     }
 
     // (both cases) Output V with index I, chain Top
-    if segment_below.helper_vertex != vertex {
+    if segment_below.data.helper_vertex != vertex {
         monotone_events.push(dbg!(MonotoneEvent {
             vertex,
-            component: segment_below.component,
+            component: segment_below.data.component,
             chain: SweepLineChain::Top,
         }));
     }
@@ -627,22 +627,22 @@ fn handle_merge_vertex<G: Kernel>(
         upper_event,
         vertices,
         monotone_events,
-        upper_segment.component,
+        upper_segment.data.component,
         SweepLineChain::Bottom,
     );
 
     println!("Handling upper segment");
     if let HelperType::Merge {
         upper_component: upper_segment_helper_upper_component,
-    } = upper_segment.helper_type
+    } = upper_segment.data.helper_type
     {
         // These would have sorted in the other order
-        debug_assert!(vertex != upper_segment.helper_vertex);
+        debug_assert!(vertex != upper_segment.data.helper_vertex);
 
         // Output H with index J2, chain Bottom
         // (deferred)
         monotone_events.push(dbg!(MonotoneEvent {
-            vertex: upper_segment.helper_vertex,
+            vertex: upper_segment.data.helper_vertex,
             component: upper_segment_helper_upper_component,
             chain: SweepLineChain::Bottom,
         }));
@@ -650,7 +650,7 @@ fn handle_merge_vertex<G: Kernel>(
         // Output V with index I2, chain Top (component end vertex)
         monotone_events.push(dbg!(MonotoneEvent {
             vertex,
-            component: upper_segment.component,
+            component: upper_segment.data.component,
             chain: SweepLineChain::Top,
         }));
 
@@ -658,8 +658,8 @@ fn handle_merge_vertex<G: Kernel>(
         // since it might be an end node, and we therefore might want to put it on chain Top
 
         // Edit status to set existing helper H to V (merge helper index = J2)
-        segment_below.helper_vertex = vertex;
-        segment_below.helper_type = HelperType::Merge {
+        segment_below.data.helper_vertex = vertex;
+        segment_below.data.helper_type = HelperType::Merge {
             upper_component: upper_segment_helper_upper_component,
         };
     } else {
@@ -667,9 +667,9 @@ fn handle_merge_vertex<G: Kernel>(
         // since it might be an end node, and we therefore might want to put it on chain Top
 
         // Edit status to set existing helper H to V (merge helper index = I2)
-        segment_below.helper_vertex = vertex;
-        segment_below.helper_type = HelperType::Merge {
-            upper_component: upper_segment.component,
+        segment_below.data.helper_vertex = vertex;
+        segment_below.data.helper_type = HelperType::Merge {
+            upper_component: upper_segment.data.component,
         };
     }
 }
@@ -683,10 +683,10 @@ fn handle_bottom_vertex<G: Kernel>(
     right_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
 ) {
     // Search status & remove left segment, noting its index I and helper H
-    let pos = find_status_entry(geometry, status, pt, left_event.edge, left_event.segment);
+    let pos = status.find_entry(geometry, pt, &left_event.segment);
     let left_segment = status.remove(pos);
 
     // Output left segment with index I, chain Bottom
@@ -695,17 +695,17 @@ fn handle_bottom_vertex<G: Kernel>(
         left_event,
         vertices,
         monotone_events,
-        left_segment.component,
+        left_segment.data.component,
         SweepLineChain::Bottom,
     );
 
     // Check if helper is a merge vertex
-    if let HelperType::Merge { upper_component } = left_segment.helper_type {
-        if left_segment.helper_vertex != vertex {
+    if let HelperType::Merge { upper_component } = left_segment.data.helper_type {
+        if left_segment.data.helper_vertex != vertex {
             // Output H with index J, chain Bottom
             // (deferred)
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: left_segment.helper_vertex,
+                vertex: left_segment.data.helper_vertex,
                 component: upper_component,
                 chain: SweepLineChain::Bottom,
             }));
@@ -713,7 +713,7 @@ fn handle_bottom_vertex<G: Kernel>(
             // Output V with index I, chain Top (component end vertex)
             monotone_events.push(dbg!(MonotoneEvent {
                 vertex,
-                component: left_segment.component,
+                component: left_segment.data.component,
                 chain: SweepLineChain::Top,
             }));
         }
@@ -726,38 +726,38 @@ fn handle_bottom_vertex<G: Kernel>(
         }));
 
         // Insert right segment into status with index J and helper V (helper type: Bottom)
-        let pos = find_insertion_point(geometry, status, pt);
+        let pos = status.find_insertion_point(geometry, pt);
         status.insert(
             pos,
-            StatusEntry {
-                edge: right_event.edge,
-                segment: right_event.segment,
-                chain: right_event.chain,
-                component: upper_component,
-                helper_vertex: vertex,
-                helper_type: HelperType::Bottom,
-            },
+            SweepLineStatusEntry::new(
+                right_event.segment,
+                StatusData {
+                    component: upper_component,
+                    helper_vertex: vertex,
+                    helper_type: HelperType::Bottom,
+                },
+            ),
         );
     } else {
         // Output V with index I, chain Bottom
         monotone_events.push(dbg!(MonotoneEvent {
             vertex,
-            component: left_segment.component,
+            component: left_segment.data.component,
             chain: SweepLineChain::Bottom,
         }));
 
         // Insert right segment into status with index I and helper V (helper type: Bottom)
-        let pos = find_insertion_point(geometry, status, pt);
+        let pos = status.find_insertion_point(geometry, pt);
         status.insert(
             pos,
-            StatusEntry {
-                edge: right_event.edge,
-                segment: right_event.segment,
-                chain: right_event.chain,
-                component: left_segment.component,
-                helper_vertex: vertex,
-                helper_type: HelperType::Bottom,
-            },
+            SweepLineStatusEntry::new(
+                right_event.segment,
+                StatusData {
+                    component: left_segment.data.component,
+                    helper_vertex: vertex,
+                    helper_type: HelperType::Bottom,
+                },
+            ),
         );
     }
 }
@@ -771,19 +771,19 @@ fn handle_top_vertex<G: Kernel>(
     _right_event: &SweepLineEvent<G>,
     vertices: &mut IndexedList<G::TriangleVertex>,
     monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut Vec<StatusEntry<G>>,
+    status: &mut SweepLineStatus<G, StatusData>,
 ) {
     // Search status to find segment directly below this vertex, noting its index I and helper H
-    let pos = find_status_below(geometry, status, pt);
+    let pos = status.find_below(geometry, pt);
     let segment_below = &mut status[pos];
 
     // Check if helper is a merge vertex
-    if let HelperType::Merge { upper_component } = segment_below.helper_type {
+    if let HelperType::Merge { upper_component } = segment_below.data.helper_type {
         // Output H with index J, chain Bottom
         // (deferred)
-        if segment_below.helper_vertex != vertex {
+        if segment_below.data.helper_vertex != vertex {
             monotone_events.push(dbg!(MonotoneEvent {
-                vertex: segment_below.helper_vertex,
+                vertex: segment_below.data.helper_vertex,
                 component: upper_component,
                 chain: SweepLineChain::Bottom,
             }));
@@ -812,7 +812,7 @@ fn handle_top_vertex<G: Kernel>(
             left_event,
             vertices,
             monotone_events,
-            segment_below.component,
+            segment_below.data.component,
             SweepLineChain::Top,
         );
     }
@@ -820,75 +820,13 @@ fn handle_top_vertex<G: Kernel>(
     // (both cases) Output V with index I, chain Top
     monotone_events.push(dbg!(MonotoneEvent {
         vertex,
-        component: segment_below.component,
+        component: segment_below.data.component,
         chain: SweepLineChain::Top,
     }));
 
     // Edit status to set existing helper H to V (helper type: Top)
-    segment_below.helper_vertex = vertex;
-    segment_below.helper_type = HelperType::Top;
-}
-
-/// Find insertion point in status for a new segment
-fn find_insertion_point<G: Kernel>(
-    geometry: &G,
-    status: &[StatusEntry<G>],
-    event_point: G::SweepLineEventPoint,
-) -> usize {
-    status.partition_point(|entry| {
-        let ord =
-            geometry.sweep_line_segment_cmp(entry.edge, entry.segment, entry.chain, event_point);
-        matches!(ord, Ordering::Less | Ordering::Equal)
-    })
-}
-
-/// Find a specific status entry by edge and segment
-// TODO: factor this out, along with the similar code in clip.rs, into a sweep_line module
-fn find_status_entry<G: Kernel>(
-    geometry: &G,
-    status: &[StatusEntry<G>],
-    event_point: G::SweepLineEventPoint,
-    edge: G::Edge,
-    segment: G::SweepLineEdgeSegment,
-) -> usize {
-    let pos = status.partition_point(|entry| {
-        let ord =
-            geometry.sweep_line_segment_cmp(entry.edge, entry.segment, entry.chain, event_point);
-        matches!(ord, Ordering::Less)
-    });
-
-    // Linear search around pos to find matching edge and segment
-    for i in pos..status.len() {
-        if status[i].edge == edge && status[i].segment == segment {
-            return i;
-        }
-    }
-    for i in (0..pos).rev() {
-        if status[i].edge == edge && status[i].segment == segment {
-            return i;
-        }
-    }
-
-    panic!("Status entry not found");
-}
-
-/// Find the status entry directly below a vertex
-// TODO: factor this out, along with the similar code in clip.rs, into a sweep_line module
-fn find_status_below<G: Kernel>(
-    geometry: &G,
-    status: &[StatusEntry<G>],
-    event_point: G::SweepLineEventPoint,
-) -> usize {
-    let pos = status.partition_point(|entry| {
-        let ord =
-            geometry.sweep_line_segment_cmp(entry.edge, entry.segment, entry.chain, event_point);
-        matches!(ord, Ordering::Less)
-    });
-
-    if pos == 0 {
-        panic!("No segment below vertex");
-    }
-    pos - 1
+    segment_below.data.helper_vertex = vertex;
+    segment_below.data.helper_type = HelperType::Top;
 }
 
 /// Output an edge segment by discretizing it into triangle vertices
@@ -900,11 +838,7 @@ fn output_edge_segment<G: Kernel>(
     component: u32,
     chain: SweepLineChain,
 ) {
-    for triangle_vertex in geometry.sweep_line_edge_segment_to_triangle_vertices(
-        event.edge,
-        event.segment,
-        event.chain,
-    ) {
+    for triangle_vertex in geometry.sweep_line_edge_segment_to_triangle_vertices(&event.segment) {
         let vertex = vertices.push(triangle_vertex);
         monotone_events.push(dbg!(MonotoneEvent {
             vertex,
