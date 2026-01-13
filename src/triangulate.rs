@@ -1,7 +1,8 @@
 use std::cmp::Ordering;
 
-use crate::kernel::{Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, TriangleVertex};
+use crate::kernel::{Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
 use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
+use crate::triangle_kernel::TriangleKernel;
 
 /// Error type for triangulation operations.
 /// Passing in cleaned data to triangulate() should never cause an error.
@@ -20,31 +21,31 @@ pub enum TriangulationError {
 
 /// Main triangulation function
 ///
-/// Takes a geometry kernel and edges, and returns a triangle mesh
+/// Takes a geometry kernel, triangle kernel, and edges, and returns a triangle mesh
 ///
 /// # Arguments
 /// * `geometry` - The geometric kernel
+/// * `triangle_kernel` - The triangle kernel for managing vertices
 /// * `edges` - Iterator over edges that bound the region to triangulate
 ///
 /// # Returns
-/// A Result containing a tuple of (vertices, triangles) where:
-/// - vertices is a Vec of G::TriangleVertex
-/// - triangles is a Vec of [u32; 3] indices into the vertices
+/// A Result containing a vector of triangles
 ///
 /// # Errors
 /// Returns a TriangulationError if the input has invalid topology or
 /// if the triangulation algorithm encounters an unexpected state
 pub fn triangulate<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     edges: impl Iterator<Item = G::Edge>,
-) -> Result<(Vec<G::TriangleVertex>, Vec<[u32; 3]>), TriangulationError> {
+) -> Result<Vec<<G::TriangleKernel as TriangleKernel>::Triangle>, TriangulationError> {
     // Stage 1: Partition into monotone pieces
-    let (vertices, monotone_events) = partition_into_monotone(geometry, edges)?;
+    let monotone_events = partition_into_monotone(geometry, triangle_kernel, edges)?;
 
     // Stage 2: Triangulate each monotone component
-    let triangles = triangulate_monotone(vertices.as_slice(), monotone_events)?;
+    let triangles = triangulate_monotone(triangle_kernel, monotone_events)?;
 
-    Ok((vertices, triangles))
+    Ok(triangles)
 }
 
 /// Helper type to track vertex characterization
@@ -61,16 +62,16 @@ type MonotoneComponentIndex = u32;
 
 /// Algorithm-specific data for status entries in stage 1 (partitioning into monotone components)
 #[derive(Debug, Clone)]
-struct StatusData {
+struct StatusData<V> {
     component: MonotoneComponentIndex,
-    helper_vertex: u32,
+    helper_vertex: V,
     helper_type: HelperType,
 }
 
 /// Event for stage 2 (monotone triangulation)
 #[derive(Debug, Clone, Copy)]
-struct MonotoneEvent {
-    vertex: u32,
+struct MonotoneEvent<V> {
+    vertex: V,
     component: MonotoneComponentIndex,
     chain: SweepLineChain,
 }
@@ -88,33 +89,14 @@ impl MonotoneComponentAllocator {
     }
 }
 
-struct IndexedList<T>(Vec<T>);
-
-impl<T: std::fmt::Debug> IndexedList<T> {
-    fn new() -> Self {
-        Self(vec![])
-    }
-    fn push(&mut self, value: T) -> u32 {
-        let i = self.0.len() as u32;
-        self.0.push(value);
-        i
-    }
-}
-
-impl<T> From<IndexedList<T>> for Vec<T> {
-    fn from(value: IndexedList<T>) -> Self {
-        value.0
-    }
-}
-
 /// Stage 1: Partition into monotone pieces
 fn partition_into_monotone<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     edges: impl Iterator<Item = G::Edge>,
-) -> Result<(Vec<G::TriangleVertex>, Vec<MonotoneEvent>), TriangulationError> {
-    let mut vertices = IndexedList::new();
+) -> Result<Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>, TriangulationError> {
     let mut monotone_events = Vec::new();
-    let mut status = SweepLineStatus::<G, StatusData>::new();
+    let mut status = SweepLineStatus::<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>::new();
     let mut component_allocator = MonotoneComponentAllocator::new();
 
     // Build event queue with events that share a vertex sorted clockwise
@@ -131,7 +113,7 @@ fn partition_into_monotone<G: Kernel>(
         .chunk_by(|a, b| geometry.sweep_line_event_point(a) == geometry.sweep_line_event_point(b))
     {
         let pt = geometry.sweep_line_event_point(&vertex_events[0]);
-        let vertex_index = vertices.push(geometry.sweep_line_event_point_to_triangle_vertex(pt));
+        let vertex = geometry.sweep_line_event_point_to_triangle_vertex(triangle_kernel, pt);
 
         let (event_pairs, remainder) = vertex_events.as_chunks::<2>();
         if remainder.len() > 0 {
@@ -141,11 +123,11 @@ fn partition_into_monotone<G: Kernel>(
         for [e1, e2] in event_pairs {
             process_event_pair(
                 geometry,
+                triangle_kernel,
                 pt,
-                vertex_index,
+                vertex,
                 e1,
                 e2,
-                &mut vertices,
                 &mut monotone_events,
                 &mut status,
                 &mut component_allocator,
@@ -153,19 +135,19 @@ fn partition_into_monotone<G: Kernel>(
         }
     }
 
-    Ok((vertices.into(), monotone_events))
+    Ok(monotone_events)
 }
 
 /// Process a pair of events at a vertex
 fn process_event_pair<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     event_a: &SweepLineEvent<G>,
     event_b: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) -> Result<(), TriangulationError> {
     // Categorize the vertex based on the event pair
@@ -185,11 +167,11 @@ fn process_event_pair<G: Kernel>(
             // Start(Top) + Start(Bottom) = start vertex
             handle_start_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
                 component_allocator,
@@ -204,11 +186,11 @@ fn process_event_pair<G: Kernel>(
             // Start(Bottom) + Start(Top) = split vertex
             handle_split_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
                 component_allocator,
@@ -223,11 +205,11 @@ fn process_event_pair<G: Kernel>(
             // End(Bottom) + End(Top) = end vertex
             handle_end_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
             );
@@ -241,11 +223,11 @@ fn process_event_pair<G: Kernel>(
             // End(Top) + End(Bottom) = merge vertex
             handle_merge_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
             )?;
@@ -259,11 +241,11 @@ fn process_event_pair<G: Kernel>(
             // End(Bottom) + Start(Bottom) = bottom vertex
             handle_bottom_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
             );
@@ -277,11 +259,11 @@ fn process_event_pair<G: Kernel>(
             // End(Top) + Start(Top) = top vertex
             handle_top_vertex(
                 geometry,
+                triangle_kernel,
                 pt,
                 vertex,
                 event_a,
                 event_b,
-                vertices,
                 monotone_events,
                 status,
             )?;
@@ -297,13 +279,13 @@ fn process_event_pair<G: Kernel>(
 /// Handle start vertex
 fn handle_start_vertex<G: Kernel>(
     geometry: &G,
+    _triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     _upper_event: &SweepLineEvent<G>,
     lower_event: &SweepLineEvent<G>,
-    _vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) {
     let component = component_allocator.allocate();
@@ -333,13 +315,13 @@ fn handle_start_vertex<G: Kernel>(
 /// Handle end vertex
 fn handle_end_vertex<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     lower_event: &SweepLineEvent<G>,
     upper_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
 ) {
     // Search status & remove lower segment, noting helper H & component index I
     let segment_below = status.remove(geometry, pt, &lower_event.segment);
@@ -347,8 +329,8 @@ fn handle_end_vertex<G: Kernel>(
     // Output lower segment with index I, chain Bottom
     output_edge_segment(
         geometry,
+        triangle_kernel,
         lower_event,
-        vertices,
         monotone_events,
         segment_below.data.component,
         SweepLineChain::Bottom,
@@ -383,8 +365,8 @@ fn handle_end_vertex<G: Kernel>(
         // Output upper segment with index J, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             upper_event,
-            vertices,
             monotone_events,
             upper_component,
             SweepLineChain::Top,
@@ -393,8 +375,8 @@ fn handle_end_vertex<G: Kernel>(
         // Output upper segment with index I, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             upper_event,
-            vertices,
             monotone_events,
             segment_below.data.component,
             SweepLineChain::Top,
@@ -405,13 +387,13 @@ fn handle_end_vertex<G: Kernel>(
 /// Handle split vertex
 fn handle_split_vertex<G: Kernel>(
     geometry: &G,
+    _triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     upper_event: &SweepLineEvent<G>,
     _lower_event: &SweepLineEvent<G>,
-    _vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) -> Result<(), TriangulationError> {
     // Search status to find segment directly below this vertex, noting its index I and helper H
@@ -565,13 +547,13 @@ fn handle_split_vertex<G: Kernel>(
 /// Handle merge vertex
 fn handle_merge_vertex<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     lower_event: &SweepLineEvent<G>,
     upper_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status & remove upper segment, noting its index I2 and helper H2
     let (segment_below, upper_segment) =
@@ -596,8 +578,8 @@ fn handle_merge_vertex<G: Kernel>(
         // Output lower segment with index J, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             lower_event,
-            vertices,
             monotone_events,
             segment_below_helper_upper_component,
             SweepLineChain::Top,
@@ -613,8 +595,8 @@ fn handle_merge_vertex<G: Kernel>(
         // Output lower segment with index I, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             lower_event,
-            vertices,
             monotone_events,
             segment_below.data.component,
             SweepLineChain::Top,
@@ -673,8 +655,8 @@ fn handle_merge_vertex<G: Kernel>(
     // Output upper segment with index I2, chain Bottom
     output_edge_segment(
         geometry,
+        triangle_kernel,
         upper_event,
-        vertices,
         monotone_events,
         upper_segment.data.component,
         SweepLineChain::Bottom,
@@ -686,13 +668,13 @@ fn handle_merge_vertex<G: Kernel>(
 /// Handle bottom vertex
 fn handle_bottom_vertex<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     left_event: &SweepLineEvent<G>,
     right_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
 ) {
     // Search status & remove left segment, noting its index I and helper H
     let left_segment = status.remove(geometry, pt, &left_event.segment);
@@ -700,8 +682,8 @@ fn handle_bottom_vertex<G: Kernel>(
     // Output left segment with index I, chain Bottom
     output_edge_segment(
         geometry,
+        triangle_kernel,
         left_event,
-        vertices,
         monotone_events,
         left_segment.data.component,
         SweepLineChain::Bottom,
@@ -773,13 +755,13 @@ fn handle_bottom_vertex<G: Kernel>(
 /// Handle top vertex
 fn handle_top_vertex<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     pt: G::SweepLineEventPoint,
-    vertex: u32,
+    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
     left_event: &SweepLineEvent<G>,
     _right_event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
-    status: &mut SweepLineStatus<G, StatusData>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status to find segment directly below this vertex, noting its index I and helper H
     let segment_below = status
@@ -808,8 +790,8 @@ fn handle_top_vertex<G: Kernel>(
         // Output left segment with index J, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             left_event,
-            vertices,
             monotone_events,
             upper_component,
             SweepLineChain::Top,
@@ -818,8 +800,8 @@ fn handle_top_vertex<G: Kernel>(
         // Output left segment with index I, chain Top
         output_edge_segment(
             geometry,
+            triangle_kernel,
             left_event,
-            vertices,
             monotone_events,
             segment_below.data.component,
             SweepLineChain::Top,
@@ -843,37 +825,36 @@ fn handle_top_vertex<G: Kernel>(
 /// Output an edge segment by discretizing it into triangle vertices
 fn output_edge_segment<G: Kernel>(
     geometry: &G,
+    triangle_kernel: &mut G::TriangleKernel,
     event: &SweepLineEvent<G>,
-    vertices: &mut IndexedList<G::TriangleVertex>,
-    monotone_events: &mut Vec<MonotoneEvent>,
+    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     component: u32,
     chain: SweepLineChain,
 ) {
-    for triangle_vertex in geometry.sweep_line_edge_segment_to_triangle_vertices(&event.segment) {
-        let vertex = vertices.push(triangle_vertex);
+    for vertex in geometry.sweep_line_edge_segment_to_triangle_vertices(triangle_kernel, &event.segment) {
         monotone_events.push(MonotoneEvent {
             vertex,
-            component: component,
+            component,
             chain,
         });
     }
 }
 
 /// Stage 2: Triangulate monotone components
-fn triangulate_monotone<T: TriangleVertex + std::fmt::Debug>(
-    vertices: &[T],
-    mut events: Vec<MonotoneEvent>,
-) -> Result<Vec<[u32; 3]>, TriangulationError> {
+fn triangulate_monotone<TK: TriangleKernel>(
+    triangle_kernel: &mut TK,
+    mut events: Vec<MonotoneEvent<TK::Vertex>>,
+) -> Result<Vec<TK::Triangle>, TriangulationError> {
     let mut triangles = Vec::new();
 
     // Sort events by component, then by sweep-line order
     events.sort_by(|a, b| {
         a.component
             .cmp(&b.component)
-            .then_with(|| vertices[a.vertex as usize].sweep_line_cmp(&vertices[b.vertex as usize]))
+            .then_with(|| triangle_kernel.sweep_line_cmp(a.vertex, b.vertex))
     });
 
-    let mut stack: Vec<MonotoneEvent> = Vec::new();
+    let mut stack: Vec<MonotoneEvent<TK::Vertex>> = Vec::new();
 
     // Process each monotone component
     for events in events.chunk_by(|a, b| a.component == b.component) {
@@ -909,10 +890,11 @@ fn triangulate_monotone<T: TriangleVertex + std::fmt::Debug>(
                     };
 
                     // We are guaranteed to be able to form all triangles
-                    triangles.push(match v.chain {
-                        SweepLineChain::Bottom => [v.vertex, a.vertex, b.vertex],
-                        SweepLineChain::Top => [v.vertex, b.vertex, a.vertex],
-                    });
+                    let (v0, v1, v2) = match v.chain {
+                        SweepLineChain::Bottom => (v.vertex, a.vertex, b.vertex),
+                        SweepLineChain::Top => (v.vertex, b.vertex, a.vertex),
+                    };
+                    triangles.push(triangle_kernel.push_triangle(v0, v1, v2));
                 }
                 // Stack is now empty
                 // Push T back onto the stack, then push V to the stack
@@ -937,19 +919,16 @@ fn triangulate_monotone<T: TriangleVertex + std::fmt::Debug>(
                         break a;
                     };
 
-                    let triangle = match v.chain {
-                        SweepLineChain::Bottom => [v.vertex, b.vertex, a.vertex],
-                        SweepLineChain::Top => [v.vertex, a.vertex, b.vertex],
+                    let (v0, v1, v2) = match v.chain {
+                        SweepLineChain::Bottom => (v.vertex, b.vertex, a.vertex),
+                        SweepLineChain::Top => (v.vertex, a.vertex, b.vertex),
                     };
 
                     // We might not be able to form all triangles
-                    match vertices[triangle[0] as usize].sin_cmp(
-                        &vertices[triangle[1] as usize],
-                        &vertices[triangle[2] as usize],
-                    ) {
+                    match triangle_kernel.sin_cmp(v0, v1, v2) {
                         Ordering::Greater => {
                             // Triangle OK -- output it
-                            triangles.push(triangle);
+                            triangles.push(triangle_kernel.push_triangle(v0, v1, v2));
                         }
                         Ordering::Less | Ordering::Equal => {
                             // Triangle invalid -- stop iteration
@@ -974,18 +953,14 @@ fn triangulate_monotone<T: TriangleVertex + std::fmt::Debug>(
 mod tests {
     use super::*;
     use crate::kernel::polyline::F32 as Kernel;
+    use crate::triangle_kernel::{F32TriangleKernel, TriangleKernel};
 
     /// Helper to verify triangle winding and that all triangles reference valid vertices
-    fn verify_triangulation(vertices: &[[f32; 2]], triangles: &[[u32; 3]]) {
-        for &[i0, i1, i2] in triangles {
-            assert!((i0 as usize) < vertices.len());
-            assert!((i1 as usize) < vertices.len());
-            assert!((i2 as usize) < vertices.len());
-
-            // Check that triangle has positive area (counter-clockwise winding)
-            let v0 = vertices[i0 as usize];
-            let v1 = vertices[i1 as usize];
-            let v2 = vertices[i2 as usize];
+    fn verify_triangulation(triangle_kernel: &F32TriangleKernel, triangles: &[(u32, u32, u32)]) {
+        for &(i0, i1, i2) in triangles {
+            let v0 = triangle_kernel.v(i0);
+            let v1 = triangle_kernel.v(i1);
+            let v2 = triangle_kernel.v(i2);
 
             let cross = (v1[0] - v0[0]) * (v2[1] - v0[1]) - (v1[1] - v0[1]) * (v2[0] - v0[0]);
             assert!(
@@ -1006,10 +981,11 @@ mod tests {
         // Simple triangle - has start, top, and end vertices
         let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 0)];
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
-        verify_triangulation(&vertices, &triangles);
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 1, "Triangle should produce 1 triangle");
     }
 
@@ -1019,9 +995,11 @@ mod tests {
         let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2, "Quad should produce 2 triangles");
     }
 
@@ -1041,9 +1019,11 @@ mod tests {
             let edges = (0..sides).map(|i| (i, (i + 1) % sides));
 
             let mut kernel = Kernel::new(verts);
-            let (vertices, triangles) = triangulate(&mut kernel, edges).unwrap();
+            let mut triangle_kernel = F32TriangleKernel::new();
 
-            verify_triangulation(&vertices, &triangles);
+            let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges).unwrap();
+
+            verify_triangulation(&triangle_kernel, &triangles);
             assert_eq!(triangles.len(), (sides - 2) as usize);
         }
     }
@@ -1073,9 +1053,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
     }
 
@@ -1100,9 +1082,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2,);
     }
 
@@ -1130,9 +1114,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2,);
     }
 
@@ -1160,9 +1146,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2);
     }
 
@@ -1190,9 +1178,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2,);
     }
 
@@ -1221,9 +1211,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4,);
     }
 
@@ -1251,9 +1243,11 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 2,);
     }
 
@@ -1299,9 +1293,11 @@ mod tests {
             (7, 0),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 6);
     }
 
@@ -1349,9 +1345,11 @@ mod tests {
             (5, 0),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
     }
 
@@ -1392,9 +1390,11 @@ mod tests {
             eprintln!("Testing comb: {}", desc);
             let mut kernel = Kernel::new(comb.to_vec());
 
-            let (vertices, triangles) = triangulate(&mut kernel, edges.iter().copied()).unwrap();
+            let mut triangle_kernel = F32TriangleKernel::new();
 
-            verify_triangulation(&vertices, &triangles);
+            let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.iter().copied()).unwrap();
+
+            verify_triangulation(&triangle_kernel, &triangles);
             assert_eq!(triangles.len(), 5);
         }
     }
@@ -1448,9 +1448,11 @@ mod tests {
             eprintln!("Testing degenerate comb: {}", desc);
             let mut kernel = Kernel::new(comb.to_vec());
 
-            let (vertices, triangles) = triangulate(&mut kernel, edges.iter().copied()).unwrap();
+            let mut triangle_kernel = F32TriangleKernel::new();
 
-            verify_triangulation(&vertices, &triangles);
+            let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.iter().copied()).unwrap();
+
+            verify_triangulation(&triangle_kernel, &triangles);
             assert_eq!(triangles.len(), 3);
         }
     }
@@ -1498,9 +1500,11 @@ mod tests {
             (12, 10),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 17);
     }
 
@@ -1563,9 +1567,11 @@ mod tests {
             (8, 7),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
+        let mut triangle_kernel = F32TriangleKernel::new();
 
-        verify_triangulation(&vertices, &triangles);
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 10);
     }
 
@@ -1610,8 +1616,9 @@ mod tests {
             (8, 6),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
-        verify_triangulation(&vertices, &triangles);
+        let mut triangle_kernel = F32TriangleKernel::new();
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
     }
 
@@ -1649,8 +1656,9 @@ mod tests {
             (8, 6),
         ];
 
-        let (vertices, triangles) = triangulate(&mut kernel, edges.into_iter()).unwrap();
-        verify_triangulation(&vertices, &triangles);
+        let mut triangle_kernel = F32TriangleKernel::new();
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+        verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
     }
 }

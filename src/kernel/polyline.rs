@@ -1,11 +1,9 @@
 use std::cmp::Ordering;
 
 use crate::{
-    kernel::{
-        Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment,
-        TriangleVertex,
-    },
+    kernel::{Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     rtree::Rect,
+    triangle_kernel::{F32TriangleKernel, TriangleKernel},
 };
 
 pub struct F32 {
@@ -41,7 +39,7 @@ impl Kernel for F32 {
     type Intersection = [f32; 2];
     type SweepLineEdgePortion = ();
     type SweepLineEventPoint = u32;
-    type TriangleVertex = [f32; 2];
+    type TriangleKernel = F32TriangleKernel;
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         points_coincident_f32(self.v(a), self.v(b), Self::EPSILON)
@@ -228,16 +226,18 @@ impl Kernel for F32 {
 
     fn sweep_line_event_point_to_triangle_vertex(
         &self,
+        triangle_kernel: &mut Self::TriangleKernel,
         event_point: Self::SweepLineEventPoint,
-    ) -> Self::TriangleVertex {
-        self.v(event_point)
+    ) -> <Self::TriangleKernel as TriangleKernel>::Vertex {
+        triangle_kernel.push_vertex(self.v(event_point))
     }
 
     fn sweep_line_edge_segment_to_triangle_vertices(
         &self,
+        _triangle_kernel: &mut Self::TriangleKernel,
         _segment: &SweepLineSegment<Self>,
-    ) -> impl Iterator<Item = Self::TriangleVertex> {
-        // For polylines, we just return the two endpoints
+    ) -> impl Iterator<Item = <Self::TriangleKernel as TriangleKernel>::Vertex> {
+        // For polylines, we don't discretize edges into intermediate vertices
         // This could be extended for curves to discretize them
         None.into_iter()
     }
@@ -282,22 +282,6 @@ impl Kernel for F32 {
     }
 }
 
-impl TriangleVertex for [f32; 2] {
-    /// Compare vertices in sweep-line order (left-to-right, bottom-to-top)
-    fn sweep_line_cmp(&self, other: &Self) -> Ordering {
-        sweep_line_cmp_f32(*self, *other)
-    }
-
-    /// Compare the angular order of vectors from self to a and self to b
-    /// Returns the sign of the cross product: (a - self) x (b - self)
-    /// Greater = b is counterclockwise from a (positive cross product)
-    /// Equal = collinear (zero cross product)
-    /// Less = b is clockwise from a (negative cross product)
-    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering {
-        sin_cmp_f32(*self, *a, *b)
-    }
-}
-
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ExtentsF32 {
     scale: [f32; 2],
@@ -305,14 +289,14 @@ pub struct ExtentsF32 {
 }
 
 #[inline]
-fn sweep_line_cmp_f32(a: [f32; 2], b: [f32; 2]) -> Ordering {
+pub fn sweep_line_cmp_f32(a: [f32; 2], b: [f32; 2]) -> Ordering {
     a[0].partial_cmp(&b[0])
         .unwrap_or(Ordering::Equal)
         .then_with(|| a[1].partial_cmp(&b[1]).unwrap_or(Ordering::Equal))
 }
 
 #[inline]
-fn sin_cmp_f32(common: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Ordering {
+pub fn sin_cmp_f32(common: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Ordering {
     // Compute cross product: (a - origin) x (b - origin)
     let ax = a[0] - common[0];
     let ay = a[1] - common[1];

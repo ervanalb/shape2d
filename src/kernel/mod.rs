@@ -1,4 +1,5 @@
 use crate::rtree::Rect;
+use crate::triangle_kernel::TriangleKernel;
 use std::cmp::Ordering;
 use std::fmt::Debug;
 pub mod polyline;
@@ -13,7 +14,7 @@ pub trait Kernel: Sized {
     type Intersection;
     type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
-    type TriangleVertex: TriangleVertex;
+    type TriangleKernel: TriangleKernel;
 
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
@@ -90,31 +91,21 @@ pub trait Kernel: Sized {
     // Triangulation methods
     fn sweep_line_event_point_to_triangle_vertex(
         &self,
+        triangle_kernel: &mut Self::TriangleKernel,
         event_point: Self::SweepLineEventPoint,
-    ) -> Self::TriangleVertex;
+    ) -> <Self::TriangleKernel as TriangleKernel>::Vertex;
 
     fn sweep_line_edge_segment_to_triangle_vertices(
         &self,
+        triangle_kernel: &mut Self::TriangleKernel,
         segment: &SweepLineSegment<Self>,
-    ) -> impl Iterator<Item = Self::TriangleVertex>;
+    ) -> impl Iterator<Item = <Self::TriangleKernel as TriangleKernel>::Vertex>;
 
     fn sweep_line_event_cmp_clockwise(
         &self,
         a: &SweepLineEvent<Self>,
         b: &SweepLineEvent<Self>,
     ) -> Ordering;
-}
-
-pub trait TriangleVertex: Copy + Debug {
-    /// Compare vertices in sweep-line order (left-to-right, bottom-to-top)
-    fn sweep_line_cmp(&self, other: &Self) -> Ordering;
-
-    /// Compare the angular order of vectors from self to a and self to b
-    /// Returns the sign of the cross product: (a - self) x (b - self)
-    /// Greater = b is counterclockwise from a (positive cross product)
-    /// Equal = collinear (zero cross product)
-    /// Less = b is clockwise from a (negative cross product)
-    fn sin_cmp(&self, a: &Self, b: &Self) -> Ordering;
 }
 
 pub trait Edge: Copy + Ord + Debug {
