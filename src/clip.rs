@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
-use crate::kernel::{Edge, Kernel, SweepLineEvent, SweepLineEventType};
+use crate::kernel::{Edge, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
 use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
 
 /// Edge direction
@@ -105,11 +105,17 @@ fn sweep_line<K: Kernel>(
 
                     if below_inside != above_inside {
                         if above_inside {
-                            // Bottom edge: emit in forward direction
-                            e.insert(Some(Direction::Forward));
+                            // Bottom edge
+                            e.insert(Some(match event.segment.chain {
+                                SweepLineChain::Bottom => Direction::Forward,
+                                SweepLineChain::Top => Direction::Reverse,
+                            }));
                         } else {
-                            // Top edge: emit in reverse direction
-                            e.insert(Some(Direction::Reverse));
+                            // Top edge
+                            e.insert(Some(match event.segment.chain {
+                                SweepLineChain::Top => Direction::Forward,
+                                SweepLineChain::Bottom => Direction::Reverse,
+                            }));
                         }
                     } else {
                         e.insert(None);

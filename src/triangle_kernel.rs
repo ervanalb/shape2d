@@ -46,6 +46,10 @@ impl F32TriangleKernel {
         index
     }
 
+    pub fn vertex_count(&self) -> usize {
+        self.vertices.len()
+    }
+
     pub fn v(&self, i: u32) -> [f32; 2] {
         self.vertices[i as usize]
     }

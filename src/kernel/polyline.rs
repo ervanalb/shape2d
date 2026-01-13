@@ -21,7 +21,7 @@ impl F32 {
         self.vertices.len()
     }
 
-    fn v(&self, i: u32) -> [f32; 2] {
+    pub fn v(&self, i: u32) -> [f32; 2] {
         self.vertices[i as usize]
     }
 
