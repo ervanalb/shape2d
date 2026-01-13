@@ -1,7 +1,10 @@
 use std::cmp::Ordering;
 
 use crate::{
-    kernel::{Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment, TriangleVertex},
+    kernel::{
+        Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment,
+        TriangleVertex,
+    },
     rtree::Rect,
 };
 
@@ -168,8 +171,16 @@ impl Kernel for F32 {
         a: &SweepLineEvent<Self>,
         b: &SweepLineEvent<Self>,
     ) -> Ordering {
-        let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.segment.chain, a.segment.edge));
-        let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.segment.chain, b.segment.edge));
+        let a_pt = self.v(sweep_line_select_vertex(
+            a.event_type,
+            a.segment.chain,
+            a.segment.edge,
+        ));
+        let b_pt = self.v(sweep_line_select_vertex(
+            b.event_type,
+            b.segment.chain,
+            b.segment.edge,
+        ));
 
         // Compare first by event point (sweep-line order)
         sweep_line_cmp_f32(a_pt, b_pt)
@@ -236,8 +247,16 @@ impl Kernel for F32 {
         a: &SweepLineEvent<Self>,
         b: &SweepLineEvent<Self>,
     ) -> Ordering {
-        let a_pt = self.v(sweep_line_select_vertex(a.event_type, a.segment.chain, a.segment.edge));
-        let b_pt = self.v(sweep_line_select_vertex(b.event_type, b.segment.chain, b.segment.edge));
+        let a_pt = self.v(sweep_line_select_vertex(
+            a.event_type,
+            a.segment.chain,
+            a.segment.edge,
+        ));
+        let b_pt = self.v(sweep_line_select_vertex(
+            b.event_type,
+            b.segment.chain,
+            b.segment.edge,
+        ));
 
         // Compare first by event point (sweep-line order)
         sweep_line_cmp_f32(a_pt, b_pt)

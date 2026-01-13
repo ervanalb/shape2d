@@ -72,21 +72,17 @@ fn sweep_line<K: Kernel>(
             SweepLineEventType::End => {
                 // Find and remove the edge from status
                 let event_point = geometry.sweep_line_event_point(event);
-                let pos = status.find_entry(geometry, event_point, &event.segment);
-                status.remove(pos);
+                status.remove(geometry, event_point, &event.segment);
             }
             SweepLineEventType::Start => {
                 // Find insertion point in status
                 let event_point = geometry.sweep_line_event_point(event);
 
-                let pos = status.find_insertion_point(geometry, event_point);
-
                 // Calculate winding number
-                let winding_below = if pos > 0 {
-                    status[pos - 1].data.winding_above
-                } else {
-                    0
-                };
+                let winding_below = status
+                    .get_equal_or_below(geometry, event_point)
+                    .map(|entry| entry.data.winding_above)
+                    .unwrap_or(0);
 
                 let winding_above = winding_below
                     + match event.segment.chain {
@@ -95,8 +91,9 @@ fn sweep_line<K: Kernel>(
                     };
 
                 // Insert into status
-                status.insert(
-                    pos,
+                status.insert_back(
+                    geometry,
+                    event_point,
                     SweepLineStatusEntry::new(event.segment, StatusData { winding_above }),
                 );
 

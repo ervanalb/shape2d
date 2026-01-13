@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 use crate::kernel::Kernel;
 
 /// Chain designation for a segment in the sweep line algorithm
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SweepLineChain {
     Bottom, // Bottom edges go from left-to-right
     Top,    // Top edges go from right-to-left
@@ -26,7 +26,6 @@ impl SweepLineEventType {
 }
 
 /// A segment in the sweep line algorithm
-#[derive(Debug)]
 pub struct SweepLineSegment<G: Kernel> {
     /// The edge containing this segment
     pub edge: G::Edge,
@@ -34,6 +33,16 @@ pub struct SweepLineSegment<G: Kernel> {
     pub portion: G::SweepLineEdgePortion,
     /// Whether this segment is the top or bottom of an enclosed area
     pub chain: SweepLineChain,
+}
+
+impl<G: Kernel> std::fmt::Debug for SweepLineSegment<G> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SweepLineSegment")
+            .field("edge", &self.edge)
+            .field("portion", &self.portion)
+            .field("chain", &self.chain)
+            .finish()
+    }
 }
 
 impl<G: Kernel> Clone for SweepLineSegment<G> {
@@ -45,8 +54,15 @@ impl<G: Kernel> Clone for SweepLineSegment<G> {
         }
     }
 }
-
 impl<G: Kernel> Copy for SweepLineSegment<G> {}
+
+impl<G: Kernel> PartialEq for SweepLineSegment<G> {
+    fn eq(&self, other: &Self) -> bool {
+        self.edge == other.edge && self.portion == other.portion && self.chain == other.chain
+    }
+}
+
+impl<G: Kernel> Eq for SweepLineSegment<G> {}
 
 impl<G: Kernel> SweepLineSegment<G> {
     pub fn new(edge: G::Edge, portion: G::SweepLineEdgePortion, chain: SweepLineChain) -> Self {
@@ -70,7 +86,7 @@ pub struct SweepLineEvent<G: Kernel> {
 /// An entry in the sweep-line status structure
 ///
 /// Bundles a SweepLineSegment with algorithm-specific data
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SweepLineStatusEntry<G: Kernel, T> {
     /// The sweep-line segment (edge, segment, chain)
     pub segment: SweepLineSegment<G>,
@@ -84,12 +100,30 @@ impl<G: Kernel, T> SweepLineStatusEntry<G, T> {
     }
 }
 
+impl<G: Kernel, T: std::fmt::Debug> std::fmt::Debug for SweepLineStatusEntry<G, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SweepLineStatus")
+            .field("segment", &self.segment)
+            .field("data", &self.data)
+            .finish()
+    }
+}
+
 /// A sweep-line status structure that maintains a sorted list of active segments
 ///
 /// This wraps a Vec and provides methods for finding insertion points,
 /// finding specific entries, and finding entries below a point.
+#[derive(Clone)]
 pub struct SweepLineStatus<G: Kernel, T> {
     entries: Vec<SweepLineStatusEntry<G, T>>,
+}
+
+impl<G: Kernel, T: std::fmt::Debug> std::fmt::Debug for SweepLineStatus<G, T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SweepLineStatus")
+            .field("entries", &self.entries)
+            .finish()
+    }
 }
 
 impl<G: Kernel, T> SweepLineStatus<G, T> {
@@ -100,83 +134,113 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
         }
     }
 
-    /// Find the insertion point for a new segment at the given event point
-    ///
-    /// Returns the index where a new entry should be inserted to maintain sorted order.
-    //TODO(Claude): return a StatusInsertionPoint struct which wraps the returned usize here.
-    //This struct should borrow the Status mutably, and provide methods below() (which returns an
-    //immutable reference to the status entry below the insertion point) and insert() (which consumes the
-    //InsertionPoint and runs insert() on the vec.)
-    pub fn find_insertion_point(&self, geometry: &G, event_point: G::SweepLineEventPoint) -> usize {
-        self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
-            matches!(ord, Ordering::Less | Ordering::Equal)
-        })
-    }
-
-    /// Find a specific status entry by matching segment
-    ///
-    /// Uses binary search followed by linear search to handle degenerate cases.
-    /// Panics if the entry is not found.
-    pub fn find_entry(
+    fn search(
         &self,
         geometry: &G,
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
-    ) -> usize {
-        let pos = self.entries.partition_point(|entry| {
+    ) -> Option<usize> {
+        let start_i = self.entries.partition_point(|entry| {
             let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
+        let end_i = self.entries.partition_point(|entry| {
+            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            matches!(ord, Ordering::Less | Ordering::Equal)
+        });
 
-        // Linear search around pos to find matching edge and portion
-        for i in pos..self.entries.len() {
-            if self.entries[i].segment.edge == target_segment.edge
-                && self.entries[i].segment.portion == target_segment.portion
-            {
-                return i;
+        // Linear search over all equal segments
+        for i in start_i..end_i {
+            if &self.entries[i].segment == target_segment {
+                return Some(i);
             }
         }
-        for i in (0..pos).rev() {
-            if self.entries[i].segment.edge == target_segment.edge
-                && self.entries[i].segment.portion == target_segment.portion
-            {
-                return i;
-            }
-        }
-
-        panic!("Status entry not found");
+        None
     }
 
-    /// Find the status entry directly below a vertex
+    /// Remove a segment from the status and return it
     ///
-    /// Returns the index of the entry immediately below the event point.
-    /// Panics if there is no segment below the vertex.
-    //TODO(Claude): This method should no longer be necessary. Instead, callers should use
-    //find_insertion_point().below().
-    pub fn find_below(&self, geometry: &G, event_point: G::SweepLineEventPoint) -> usize {
+    /// Panics if the segment is not found.
+    pub fn remove(
+        &mut self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+        target_segment: &SweepLineSegment<G>,
+    ) -> SweepLineStatusEntry<G, T> {
+        let i = self
+            .search(geometry, event_point, target_segment)
+            .expect("Segment not found in status");
+        return self.entries.remove(i);
+    }
+
+    /// Get a reference to the segment equal or below the given event point
+    /// Returns None if there is no segment below.
+    pub fn get_equal_or_below(
+        &self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+    ) -> Option<&SweepLineStatusEntry<G, T>> {
+        let pos = self.entries.partition_point(|entry| {
+            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            matches!(ord, Ordering::Less | Ordering::Equal)
+        });
+
+        if pos == 0 {
+            None
+        } else {
+            Some(&self.entries[pos - 1])
+        }
+    }
+
+    /// Get a mutable reference to the segment strictly below the given event point
+    ///
+    /// Uses strict ordering (Ordering::Less only) to find the segment below.
+    /// Returns None if there is no segment below.
+    pub fn get_below_mut(
+        &mut self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+    ) -> Option<&mut SweepLineStatusEntry<G, T>> {
         let pos = self.entries.partition_point(|entry| {
             let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
 
         if pos == 0 {
-            panic!("No segment below vertex");
+            None
+        } else {
+            Some(&mut self.entries[pos - 1])
         }
-        pos - 1
     }
 
-    /// Insert an entry at the specified position
-    //TODO(Claude): Remove this method since we will use find_insertion_point().insert()
-    pub fn insert(&mut self, pos: usize, entry: SweepLineStatusEntry<G, T>) {
+    /// Insert a new entry at the appropriate position for the given event point
+    /// behind any entries that are equal
+    pub fn insert_back(
+        &mut self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+        entry: SweepLineStatusEntry<G, T>,
+    ) {
+        let pos = self.entries.partition_point(|e| {
+            let ord = geometry.sweep_line_segment_cmp(&e.segment, event_point);
+            matches!(ord, Ordering::Less | Ordering::Equal)
+        });
         self.entries.insert(pos, entry);
     }
 
-    /// Remove and return the entry at the specified position
-    //TODO(Claude): Combine this with find_entry() since we always want to remove an entry after
-    //finding it.
-    pub fn remove(&mut self, pos: usize) -> SweepLineStatusEntry<G, T> {
-        self.entries.remove(pos)
+    /// Insert a new entry at the appropriate position for the given event point
+    /// in front of any entries that are equal
+    pub fn insert_front(
+        &mut self,
+        geometry: &G,
+        event_point: G::SweepLineEventPoint,
+        entry: SweepLineStatusEntry<G, T>,
+    ) {
+        let pos = self.entries.partition_point(|e| {
+            let ord = geometry.sweep_line_segment_cmp(&e.segment, event_point);
+            matches!(ord, Ordering::Less)
+        });
+        self.entries.insert(pos, entry);
     }
 }
 
