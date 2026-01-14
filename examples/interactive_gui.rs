@@ -20,7 +20,6 @@ fn main() -> eframe::Result {
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum WindingRule {
     Positive,
-    Negative,
     NonZero,
     EvenOdd,
     GreaterOrEqual2,
@@ -30,7 +29,6 @@ impl WindingRule {
     fn as_str(&self) -> &str {
         match self {
             WindingRule::Positive => "Positive",
-            WindingRule::Negative => "Negative",
             WindingRule::NonZero => "Non-Zero",
             WindingRule::EvenOdd => "Even-Odd",
             WindingRule::GreaterOrEqual2 => "Intersection (>=2)",
@@ -40,7 +38,6 @@ impl WindingRule {
     fn as_function(&self) -> Box<dyn Fn(i32) -> bool> {
         match self {
             WindingRule::Positive => Box::new(|w| w > 0),
-            WindingRule::Negative => Box::new(|w| w < 0),
             WindingRule::NonZero => Box::new(|w| w != 0),
             WindingRule::EvenOdd => Box::new(|w| w % 2 != 0),
             WindingRule::GreaterOrEqual2 => Box::new(|w| w >= 2),
@@ -50,7 +47,6 @@ impl WindingRule {
     fn all() -> Vec<WindingRule> {
         vec![
             WindingRule::Positive,
-            WindingRule::Negative,
             WindingRule::NonZero,
             WindingRule::EvenOdd,
             WindingRule::GreaterOrEqual2,
@@ -98,12 +94,6 @@ impl ProcessingResults {
 
         // Step 1: Clean the edges (remove intersections)
         let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());
-        let cleaned_edges = clean(&mut kernel, cleaned_edges.iter().copied()); // XXX
-        let cleaned_edges = clean(&mut kernel, cleaned_edges.iter().copied()); // XXX
-
-        dbg!(&kernel);
-        dbg!(&input_edges);
-        dbg!(&cleaned_edges);
 
         // Step 2: Clip with selected winding rule
         let winding_fn = winding_rule.as_function();
@@ -115,11 +105,13 @@ impl ProcessingResults {
         let triangles = triangulate(&kernel, &mut triangle_kernel, clipped_edges.iter().copied())
             .unwrap_or_else(|e| {
                 error = Some(format!("Triangulation error: {:?}", e));
+
+                eprintln!("Triangulation error! {:?}", e);
+                dbg!(&kernel.vertices);
+                dbg!(&clipped_edges);
+
                 Vec::new()
             });
-
-        println!("Triangle vertices: {:?}", triangle_kernel.vertices);
-        println!("Triangle indices: {:?}", triangles);
 
         Self {
             kernel,
@@ -266,10 +258,10 @@ impl InteractiveDemo {
             // Second square
             (3, 4),
             (4, 5),
-            (5, 3),
+            //(5, 3),
             //(7, 4),
         ];
-        let winding_rule = WindingRule::NonZero;
+        let winding_rule = WindingRule::Positive;
         let processing_results =
             ProcessingResults::process(&input_vertices, &input_edges, winding_rule);
 
@@ -278,9 +270,9 @@ impl InteractiveDemo {
             input_edges,
             processing_results,
             show_input: true,
-            show_cleaned: true,
+            show_cleaned: false,
             show_clipped: true,
-            show_triangulation: true,
+            show_triangulation: false,
             winding_rule,
             dragging_vertex: None,
             pointer_near_vertex: false,
@@ -477,8 +469,8 @@ impl eframe::App for InteractiveDemo {
                         }
                     }
 
-                    // Layer 1: Triangulation (filled, drawn first so it's underneath)
-                    if self.show_triangulation {
+                    // Filled triangles
+                    if self.show_clipped {
                         // Draw filled triangles
                         for triangle_points in self.processing_results.triangles_to_polygons() {
                             plot_ui.polygon(
@@ -489,7 +481,10 @@ impl eframe::App for InteractiveDemo {
                                     .stroke(egui::Stroke::NONE),
                             );
                         }
+                    }
 
+                    // Layer 1: Triangulation (filled, drawn first so it's underneath)
+                    if self.show_triangulation {
                         // Draw triangle edges as arrows
                         let triangle_arrows = self.processing_results.triangles_to_arrows();
                         for (origin, tip) in triangle_arrows {
