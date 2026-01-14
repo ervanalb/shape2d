@@ -1,5 +1,5 @@
 use eframe::egui;
-use egui_plot::{Line, Plot, PlotPoints, Points, Polygon as PlotPolygon};
+use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
 use polygon::kernel::polyline::F32 as Kernel;
 use polygon::triangle_kernel::F32TriangleKernel as TriangleKernel;
 use polygon::{clean, clip, triangulate};
@@ -44,8 +44,8 @@ impl WindingRule {
         }
     }
 
-    fn all() -> Vec<WindingRule> {
-        vec![
+    fn all() -> [WindingRule; 4] {
+        [
             WindingRule::Positive,
             WindingRule::NonZero,
             WindingRule::EvenOdd,
@@ -69,6 +69,10 @@ struct InteractiveDemo {
     // Drag state
     dragging_vertex: Option<usize>,
     pointer_near_vertex: bool,
+
+    // Edit popup state
+    show_edit_popup: bool,
+    edit_geometry_text: String,
 }
 
 struct ProcessingResults {
@@ -108,6 +112,7 @@ impl ProcessingResults {
 
                 eprintln!("Triangulation error! {:?}", e);
                 dbg!(&kernel.vertices);
+                dbg!(&cleaned_edges);
                 dbg!(&clipped_edges);
 
                 Vec::new()
@@ -235,35 +240,92 @@ impl ProcessingResults {
 
 impl InteractiveDemo {
     fn new() -> Self {
-        // Create two overlapping squares as initial geometry
         let input_vertices = vec![
-            // First square (0-3)
-            [0.0, 0.0],
-            [2.0, 0.0],
-            [2.0, 2.0],
-            //[0.0, 2.0],
-            // Second square (4-7), offset to create overlap
-            [1.0, 1.0],
-            [3.0, 1.0],
-            [3.0, 3.0],
-            //[1.0, 3.0],
+            [-0.2, 1.7],
+            [2.3, 1.7],
+            [2.3, 4.2],
+            [-0.2, 4.2],
+            [1.3, 1.],
+            [3., 1.],
+            [3., 4.],
+            [0., 0.],
+            [0., 0.],
+            [0., 0.],
+            [0., 0.],
         ];
-
         let input_edges = vec![
-            // First square
+            // Rectangle edges (0-3)
             (0, 1),
             (1, 2),
-            (2, 0),
-            //(3, 0),
-            // Second square
-            (3, 4),
+            (2, 3),
+            (3, 0),
+            // Triangle edges (4-6)
             (4, 5),
-            //(5, 3),
-            //(7, 4),
+            (5, 6),
+            (6, 4),
+            // Hole
+            (7, 8),
+            (8, 9),
+            (9, 10),
+            (10, 7),
         ];
+
+        /*
+                // Create three shapes: a star, rectangle, and triangle
+                // Star (5-pointed star, indices 0-9)
+                let input_vertices = vec![
+                    [1., 4.0],
+                    [1.2351141, 3.3236067],
+                    [1.9510565, 3.309017],
+                    [1.3804226, 2.8763933],
+                    [1.5877852, 2.190983],
+                    [1.0, 2.6],
+                    [0.41221482, 2.190983],
+                    [0.61957735, 2.8763933],
+                    [0.04894346, 3.309017],
+                    [0.76488584, 3.3236067],
+                    [-0.2, 1.7],
+                    [2.3, 1.7],
+                    [2.3, 4.2],
+                    [-0.2, 4.2],
+                    [1.3, 1.],
+                    [3., 1.],
+                    [3., 4.],
+                ];
+
+                let input_edges = vec![
+                    // Star edges (0-9)
+                    (0, 1),
+                    (1, 2),
+                    (2, 3),
+                    (3, 4),
+                    (4, 5),
+                    (5, 6),
+                    (6, 7),
+                    (7, 8),
+                    (8, 9),
+                    (9, 0),
+                    // Rectangle edges (10-13)
+                    (10, 11),
+                    (11, 12),
+                    (12, 13),
+                    (13, 10),
+                    // Triangle edges (14-16)
+                    (14, 15),
+                    (15, 16),
+                    (16, 14),
+                ];
+        */
+
         let winding_rule = WindingRule::Positive;
         let processing_results =
             ProcessingResults::process(&input_vertices, &input_edges, winding_rule);
+
+        let edit_geometry_text = serde_json::to_string_pretty(&serde_json::json!({
+            "vertices": input_vertices,
+            "edges": input_edges,
+        }))
+        .unwrap();
 
         Self {
             input_vertices,
@@ -276,7 +338,53 @@ impl InteractiveDemo {
             winding_rule,
             dragging_vertex: None,
             pointer_near_vertex: false,
+            show_edit_popup: false,
+            edit_geometry_text,
         }
+    }
+
+    fn update_from_text(&mut self) -> Result<(), String> {
+        let json: serde_json::Value = serde_json::from_str(&self.edit_geometry_text)
+            .map_err(|e| format!("Error parsing JSON: {}", e))?;
+
+        let vertices: Vec<[f32; 2]> = serde_json::from_value(
+            json.get("vertices")
+                .ok_or("Missing 'vertices' key")?
+                .clone(),
+        )
+        .map_err(|e| format!("Error parsing vertices: {}", e))?;
+
+        let edges: Vec<(u32, u32)> =
+            serde_json::from_value(json.get("edges").ok_or("Missing 'edges' key")?.clone())
+                .map_err(|e| format!("Error parsing edges: {}", e))?;
+
+        // Validate edges reference valid vertices
+        let max_vertex = vertices.len() as u32;
+        for &(a, b) in &edges {
+            if a >= max_vertex || b >= max_vertex {
+                return Err(format!(
+                    "Edge ({}, {}) references invalid vertex (max index: {})",
+                    a,
+                    b,
+                    max_vertex - 1
+                ));
+            }
+        }
+
+        self.input_vertices = vertices;
+        self.input_edges = edges;
+        self.processing_results =
+            ProcessingResults::process(&self.input_vertices, &self.input_edges, self.winding_rule);
+
+        Ok(())
+    }
+
+    fn sync_text_from_data(&mut self) {
+        self.edit_geometry_text = serde_json::to_string_pretty(&serde_json::json!({
+            "vertices": self.input_vertices,
+            "edges": self.input_edges,
+        }))
+        .unwrap();
     }
 
     // Helper function to draw solid arrows
@@ -306,7 +414,7 @@ impl InteractiveDemo {
 
         // Draw line from origin to arrow base
         plot_ui.line(
-            Line::new(vec![origin, arrow_base])
+            Line::new("", vec![origin, arrow_base])
                 .color(color)
                 .width(line_width),
         );
@@ -330,7 +438,7 @@ impl InteractiveDemo {
         ];
 
         plot_ui.polygon(
-            PlotPolygon::new(arrow_head)
+            PlotPolygon::new("", arrow_head)
                 .fill_color(color)
                 .stroke(egui::Stroke::NONE),
         );
@@ -374,6 +482,12 @@ impl eframe::App for InteractiveDemo {
                     &self.input_edges,
                     self.winding_rule,
                 );
+            }
+
+            ui.separator();
+            if ui.button("Edit Geometry...").clicked() {
+                self.sync_text_from_data();
+                self.show_edit_popup = true;
             }
 
             ui.separator();
@@ -474,7 +588,7 @@ impl eframe::App for InteractiveDemo {
                         // Draw filled triangles
                         for triangle_points in self.processing_results.triangles_to_polygons() {
                             plot_ui.polygon(
-                                PlotPolygon::new(PlotPoints::new(triangle_points))
+                                PlotPolygon::new("", triangle_points)
                                     .fill_color(egui::Color32::from_rgba_unmultiplied(
                                         100, 149, 237, 128,
                                     ))
@@ -502,7 +616,7 @@ impl eframe::App for InteractiveDemo {
                         let triangle_verts = self.processing_results.triangles_to_vertices();
                         if !triangle_verts.is_empty() {
                             plot_ui.points(
-                                Points::new(triangle_verts)
+                                Points::new("", triangle_verts)
                                     .color(egui::Color32::from_rgb(100, 149, 237))
                                     .radius(3.0),
                             );
@@ -539,7 +653,7 @@ impl eframe::App for InteractiveDemo {
                             };
 
                             plot_ui.points(
-                                Points::new(vec![pos])
+                                Points::new("", vec![pos])
                                     .color(color)
                                     .radius(radius)
                                     .shape(egui_plot::MarkerShape::Circle)
@@ -570,7 +684,7 @@ impl eframe::App for InteractiveDemo {
                             .edges_to_vertices(&self.processing_results.cleaned_edges);
                         if !cleaned_verts.is_empty() {
                             plot_ui.points(
-                                Points::new(cleaned_verts)
+                                Points::new("", cleaned_verts)
                                     .color(egui::Color32::from_rgb(255, 165, 0))
                                     .radius(3.5),
                             );
@@ -599,7 +713,7 @@ impl eframe::App for InteractiveDemo {
                             .edges_to_vertices(&self.processing_results.clipped_edges);
                         if !clipped_verts.is_empty() {
                             plot_ui.points(
-                                Points::new(clipped_verts)
+                                Points::new("", clipped_verts)
                                     .color(egui::Color32::from_rgb(0, 255, 0))
                                     .radius(4.0),
                             );
@@ -613,5 +727,57 @@ impl eframe::App for InteractiveDemo {
             // Update state for next frame
             self.pointer_near_vertex = plot_response.inner;
         });
+
+        // Edit geometry popup
+        if self.show_edit_popup {
+            let mut is_open = true;
+            egui::Window::new("Edit Geometry")
+                .open(&mut is_open)
+                .resizable(true)
+                .default_size([500.0, 600.0])
+                .show(ctx, |ui| {
+                    ui.label("Edit geometry as JSON:");
+                    ui.label("Format: {\"vertices\": [[x1, y1], ...], \"edges\": [[v1, v2], ...]}");
+                    ui.separator();
+
+                    egui::ScrollArea::vertical()
+                        .max_height(600.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut self.edit_geometry_text)
+                                    .font(egui::TextStyle::Monospace)
+                                    .desired_width(f32::INFINITY)
+                                    .desired_rows(30)
+                                    .clip_text(true),
+                            );
+                        });
+                    ui.separator();
+                    ui.horizontal(|ui| {
+                        if ui.button("Apply").clicked() {
+                            match self.update_from_text() {
+                                Ok(()) => {
+                                    self.show_edit_popup = false;
+                                }
+                                Err(e) => {
+                                    // Show error in the processing results
+                                    self.processing_results.error = Some(e);
+                                }
+                            }
+                        }
+                        if ui.button("Cancel").clicked() {
+                            self.show_edit_popup = false;
+                        }
+                    });
+
+                    if let Some(err) = &self.processing_results.error {
+                        ui.separator();
+                        ui.colored_label(egui::Color32::RED, err);
+                    }
+                });
+
+            if !is_open {
+                self.show_edit_popup = false;
+            }
+        }
     }
 }

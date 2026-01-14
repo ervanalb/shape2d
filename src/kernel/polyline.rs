@@ -349,30 +349,40 @@ fn intersect_segments_f32(
     b_end: [f32; 2],
     epsilon: f32,
 ) -> Option<[f32; 2]> {
-    let dx1 = a_end[0] - a_start[0];
-    let dy1 = a_end[1] - a_start[1];
-    let dx2 = b_end[0] - b_start[0];
-    let dy2 = b_end[1] - b_start[1];
+    let da_x = a_end[0] - a_start[0];
+    let da_y = a_end[1] - a_start[1];
+    let db_x = b_end[0] - b_start[0];
+    let db_y = b_end[1] - b_start[1];
 
-    let det = dx1 * dy2 - dy1 * dx2;
-
-    // Check if parallel/coincident (need abs() which requires conversion)
-    // TODO(Eric): Find a way to remove this epsilon? or use a different epsilon?
-    if det.abs() < epsilon {
-        return None;
-    }
+    let det = da_x * db_y - da_y * db_x;
 
     let dx3 = b_start[0] - a_start[0];
     let dy3 = b_start[1] - a_start[1];
 
-    // TODO(Eric): Use multiplication instead of division where possible
-    let det_inv = 1. / det;
-    let t1 = (dx3 * dy2 - dy3 * dx2) * det_inv;
-    let t2 = (dx3 * dy1 - dy3 * dx1) * det_inv;
+    let ta_det = dx3 * db_y - dy3 * db_x;
+    let tb_det = dx3 * da_y - dy3 * da_x;
 
     // Check if intersection is within both edge segments
-    if t1 >= 0. && t1 <= 1. && t2 >= 0. && t2 <= 1. {
-        Some([a_start[0] + t1 * dx1, a_start[1] + t1 * dy1])
+    let s = det.signum(); // Ensure inequalities compare the right way
+    if s * ta_det > 0. && s * ta_det < s * det && s * tb_det > 0. && s * tb_det < s * det {
+        let inv_det = 1. / det;
+
+        // Compute the intersection point two different ways and make sure they agree
+        // (they might disagree if inv_det is huge)
+        let pt_a = [
+            a_start[0] + ta_det * da_x * inv_det,
+            a_start[1] + ta_det * da_y * inv_det,
+        ];
+        let pt_b = [
+            b_start[0] + tb_det * db_x * inv_det,
+            b_start[1] + tb_det * db_y * inv_det,
+        ];
+
+        if points_coincident_f32(pt_a, pt_b, epsilon) {
+            Some(pt_a)
+        } else {
+            None
+        }
     } else {
         None
     }
@@ -612,18 +622,6 @@ mod tests {
         let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON);
         // Collinear segments return None (det is too small)
         assert!(result.is_none());
-    }
-
-    #[test]
-    fn test_intersect_segments_at_endpoint() {
-        // Two segments that share an endpoint but cross
-        let a_start = [0.0_f32, 0.0];
-        let a_end = [0.5, 0.5];
-        let b_start = [0.5, 0.5];
-        let b_end = [1.0, 0.0];
-
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON);
-        assert!(points_coincident_f32(result.unwrap(), [0.5, 0.5], EPSILON));
     }
 
     #[test]

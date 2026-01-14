@@ -148,10 +148,10 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
             matches!(ord, Ordering::Less)
         });
 
-        println!("Before remove, stautus is {:?} and we want to remove {:?}", self, i);
+        // TODO(Claude): have this function return None if the entry at the given index
+        // is not equal to the target_segment
         let removed = self.entries.remove(i);
         assert_eq!(target_segment, &removed.segment);
-        println!("After remove, stautus is {:?}", self);
 
         return removed;
     }

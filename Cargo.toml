@@ -6,5 +6,6 @@ edition = "2024"
 [dependencies]
 
 [dev-dependencies]
-eframe = "0.30"
-egui_plot = "0.30"
+eframe = "0.33"
+egui_plot = "0.34"
+serde_json = "1.0"

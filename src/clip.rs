@@ -28,6 +28,8 @@ struct StatusData {
 ///
 /// # Returns
 /// A list of edges wound positively around the "inside" area
+// TODO(Claude): Have this function return a Result, which may potentially be a Topology error
+// (e.g. if status.remove() returns None)
 pub fn clip<K: Kernel>(
     geometry: &mut K,
     edges: impl Iterator<Item = K::Edge>,

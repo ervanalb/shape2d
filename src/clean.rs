@@ -234,6 +234,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             // Don't bother checking this edge against itself
                             continue;
                         }
+                        println!("R-tree hit with edge {:?}", candidate_edge);
 
                         // Test 2: Check if these edges cancel
                         if dirty_edge.reversed() == candidate_edge {
@@ -243,7 +244,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
-                        println!("  * Test 2 ok");
+                        println!("  * Test 2 ok (edges don't cancel)");
 
                         // Test 3: Check if these two edges are fully coincident
                         if self.kernel.edges_coincident(dirty_edge, candidate_edge) {
@@ -253,7 +254,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
-                        println!("  * Test 3 ok");
+                        println!("  * Test 3 ok (edges not coincident)");
 
                         // Test 4: Check for coincident vertices
                         for v1 in self.kernel.vertices_for_edge(dirty_edge) {
@@ -266,7 +267,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                 }
                             }
                         }
-                        println!("  * Test 4 ok");
+                        println!("  * Test 4 ok (no coincident vertices)");
 
                         // Test 5: Check for vertex on edge
                         'v_on_e: for vertex in self.kernel.vertices_for_edge(dirty_edge) {
@@ -301,7 +302,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                 break 'itest;
                             }
                         }
-                        println!("  * Test 5 ok");
+                        println!("  * Test 5 ok (no vertex on edge)");
 
                         // Test 6: Check for edge intersection
                         if let Some(intersection) =
@@ -314,7 +315,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
-                        println!("  * Test 6 ok");
+                        println!("  * Test 6 ok (no edge-edge intersection)");
                     }
                 }
 
@@ -628,4 +629,39 @@ mod tests {
         let edges2 = clean(&mut kernel, edges.iter().copied());
         assert_eq!(edges, edges2);
     }
+
+    /*
+    #[test]
+    fn test_clean_intersection() {
+        let mut kernel = Kernel::new(vec![
+            [-0.20000000298023224, 1.7000000476837158],
+            [2.299999952316284, 1.7000000476837158],
+            [2.299999952316284, 4.199999809265137],
+            [-0.20000000298023224, 4.199999809265137],
+            [1.2999999523162842, 1.0],
+            [3.0, 1.0],
+            [3.0, 4.0],
+            [2.1789448261260986, 3.3461809158325195],
+            [1.4119443893432617, 2.943000316619873],
+            [2.0147764682769775, 1.0903263092041016],
+            [0.619388997554779, 2.941560983657837],
+        ]);
+        let edges = vec![
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 0),
+            (4, 5),
+            (5, 6),
+            (6, 4),
+            (7, 8),
+            (8, 9),
+            (9, 10),
+            (10, 7),
+        ];
+        let edges = clean(&mut kernel, edges.iter().copied());
+        //assert_eq!(edges, edges2);
+        panic!();
+    }
+    */
 }
