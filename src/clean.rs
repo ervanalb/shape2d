@@ -22,7 +22,6 @@ struct EdgeInfo {
 }
 
 /// Actions that can be taken during the cleaning process
-#[derive(Debug)]
 enum Action<K: Kernel> {
     /// Cancel two opposite edges
     CancelEdges { e1: K::Edge, e2: K::Edge },
@@ -41,6 +40,42 @@ enum Action<K: Kernel> {
         e2: K::Edge,
         intersection: K::Intersection,
     },
+}
+
+impl<K: Kernel> std::fmt::Debug for Action<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Action::CancelEdges { e1, e2 } => f
+                .debug_struct("CancelEdges")
+                .field("e1", e1)
+                .field("e2", e2)
+                .finish(),
+            Action::MergeVertices { v1, v2 } => f
+                .debug_struct("MergeVertices")
+                .field("v1", v1)
+                .field("v2", v2)
+                .finish(),
+            Action::MergeEdges { e1, e2 } => f
+                .debug_struct("MergeEdges")
+                .field("e1", e1)
+                .field("e2", e2)
+                .finish(),
+            Action::SplitEdge { edge, split_vertex } => f
+                .debug_struct("SplitEdge")
+                .field("edge", edge)
+                .field("split_vertex", split_vertex)
+                .finish(),
+            Action::SplitBothEdges {
+                e1,
+                e2,
+                intersection: _,
+            } => f
+                .debug_struct("SplitBothEdges")
+                .field("e1", e1)
+                .field("e2", e2)
+                .finish(),
+        }
+    }
 }
 
 /// Main spatial index structure
@@ -104,6 +139,8 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
         // Build the R-tree
         let r_tree = RTree::build(hilbert_to_rect);
 
+        dbg!(&edge_info);
+
         Self {
             kernel,
             edge_info,
@@ -133,8 +170,8 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 for vertex in self.kernel.vertices_for_edge(edge) {
                     self.vertex_to_edges.insert((vertex, edge));
                 }
-                self.dirty_set.insert(edge);
                 self.r_tree.enlarge(hilbert_value, bbox);
+                self.dirty_set.insert(edge);
             }
         }
     }
@@ -171,9 +208,11 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
 
     /// Run the cleaning algorithm
     fn clean(&mut self) {
-        while let Some(dirty_edge) = self.dirty_set.pop_first() {
+        while let Some(&dirty_edge) = self.dirty_set.first() {
             // Get edge info
             let dirty_info = &self.edge_info.get(&dirty_edge).unwrap();
+
+            println!("Processing dirty edge {:?}", dirty_edge);
 
             let mut action: Option<Action<K>> = None;
             'itest: {
@@ -186,6 +225,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         }
                     }
                 }
+                println!("  * Test 1 ok");
 
                 // Iterate over all potentially intersecting edges
                 for hilbert_value in self.r_tree.search(&dirty_info.bbox) {
@@ -203,6 +243,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
+                        println!("  * Test 2 ok");
 
                         // Test 3: Check if these two edges are fully coincident
                         if self.kernel.edges_coincident(dirty_edge, candidate_edge) {
@@ -212,6 +253,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
+                        println!("  * Test 3 ok");
 
                         // Test 4: Check for coincident vertices
                         for v1 in self.kernel.vertices_for_edge(dirty_edge) {
@@ -224,6 +266,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                 }
                             }
                         }
+                        println!("  * Test 4 ok");
 
                         // Test 5: Check for vertex on edge
                         'v_on_e: for vertex in self.kernel.vertices_for_edge(dirty_edge) {
@@ -258,6 +301,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                 break 'itest;
                             }
                         }
+                        println!("  * Test 5 ok");
 
                         // Test 6: Check for edge intersection
                         if let Some(intersection) =
@@ -270,10 +314,15 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
+                        println!("  * Test 6 ok");
                     }
                 }
+
+                // If all tests pass, remove this edge from the dirty set
+                self.dirty_set.pop_first();
             }
 
+            println!("  * Action needed: {:?}", action);
             // Handle the action if one was found
             match action {
                 Some(Action::CancelEdges { e1, e2 }) => {
@@ -299,6 +348,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 Some(Action::MergeVertices { v1, v2 }) => {
                     // Add merged vertex as a new vertex
                     let merged_vertex = self.kernel.merged_vertex(v1, v2);
+                    println!("New merged vertex: {merged_vertex:?}");
 
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
@@ -346,6 +396,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     intersection,
                 }) => {
                     let vertex = self.kernel.intersection_vertex(intersection);
+                    println!("New intersection vertex: {vertex:?}");
                     let (edge_a1, edge_a2) = self.kernel.split_edge(edge_a, vertex);
                     let (edge_b1, edge_b2) = self.kernel.split_edge(edge_b, vertex);
 
@@ -377,6 +428,8 @@ pub fn partial_clean<K: Kernel>(
 ) -> Vec<K::Edge> {
     let mut spatial_index = SpatialIndex::new(kernel, edges);
     spatial_index.clean();
+    println!("After clean:");
+    dbg!(&spatial_index.edge_info);
     spatial_index.extract_edges()
 }
 
@@ -555,5 +608,24 @@ mod tests {
         assert_eq!(result.len(), 1);
         // The edge should connect the merged vertex to vertex 2
         assert!(result[0].1 == 2 || result[0].0 == 2);
+    }
+
+    #[test]
+    fn test_complete_clean() {
+        let mut kernel = Kernel::new(vec![
+            [0.0, 0.0],
+            [2.0, 0.0],
+            [2.0, 2.0],
+            [1.0, 1.0],
+            [3.5337768, 0.99069494],
+            [3.118609, 2.8236988],
+        ]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)];
+
+        let edges = clean(&mut kernel, edges.iter().copied());
+        // Cleaning twice shouldn't change the result
+        let edges2 = clean(&mut kernel, edges.iter().copied());
+        assert_eq!(edges, edges2);
     }
 }

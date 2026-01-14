@@ -65,7 +65,7 @@ fn sweep_line<K: Kernel>(
     winding_rule: impl Fn(i32) -> bool,
 ) -> Vec<K::Edge> {
     let mut status = SweepLineStatus::<K, StatusData>::new();
-    let mut output: BTreeMap<K::Edge, Option<Direction>> = BTreeMap::new();
+    let mut output: BTreeMap<K::Edge, Direction> = BTreeMap::new();
 
     for event in events.iter() {
         match event.event_type {
@@ -99,26 +99,36 @@ fn sweep_line<K: Kernel>(
 
                 // Determine if we should emit this edge
                 // and in which direction
-                if let Entry::Vacant(e) = output.entry(event.segment.edge) {
-                    let below_inside = winding_rule(winding_below);
-                    let above_inside = winding_rule(winding_above);
+                let below_inside = winding_rule(winding_below);
+                let above_inside = winding_rule(winding_above);
 
-                    if below_inside != above_inside {
-                        if above_inside {
-                            // Bottom edge
-                            e.insert(Some(match event.segment.chain {
-                                SweepLineChain::Bottom => Direction::Forward,
-                                SweepLineChain::Top => Direction::Reverse,
-                            }));
-                        } else {
-                            // Top edge
-                            e.insert(Some(match event.segment.chain {
-                                SweepLineChain::Top => Direction::Forward,
-                                SweepLineChain::Bottom => Direction::Reverse,
-                            }));
+                if below_inside != above_inside {
+                    let dir = if above_inside {
+                        // Bottom edge
+                        match event.segment.chain {
+                            SweepLineChain::Bottom => Direction::Forward,
+                            SweepLineChain::Top => Direction::Reverse,
                         }
                     } else {
-                        e.insert(None);
+                        // Top edge
+                        match event.segment.chain {
+                            SweepLineChain::Top => Direction::Forward,
+                            SweepLineChain::Bottom => Direction::Reverse,
+                        }
+                    };
+                    match output.entry(event.segment.edge) {
+                        Entry::Vacant(e) => {
+                            e.insert(dir);
+                        }
+                        Entry::Occupied(e) => match (e.get(), dir) {
+                            (Direction::Forward, Direction::Reverse)
+                            | (Direction::Reverse, Direction::Forward) => {
+                                e.remove();
+                            }
+                            _ => {
+                                panic!("Invalid topology encountered during clipping");
+                            }
+                        },
                     }
                 }
             }
@@ -128,10 +138,9 @@ fn sweep_line<K: Kernel>(
     // Output relevant edges, reversing them if necessary
     output
         .iter()
-        .filter_map(|(&edge, dir)| match dir {
-            Some(Direction::Forward) => Some(edge),
-            Some(Direction::Reverse) => Some(edge.reversed()),
-            None => None,
+        .map(|(&edge, dir)| match dir {
+            Direction::Forward => edge,
+            Direction::Reverse => edge.reversed(),
         })
         .collect()
 }
@@ -252,5 +261,40 @@ mod tests {
         // Rule that filters out everything
         let result = clip(&mut kernel, edges.iter().copied(), |w| w > 1);
         assert_eq!(result.len(), 0);
+    }
+
+    #[test]
+    fn test_multiplicity() {
+        let mut kernel = Kernel::new(vec![
+            [-0.28425846, -0.37691897],
+            [2.0, 0.0],
+            [2.0, 2.0],
+            [-0.020360839, 0.06198269],
+            [2.939571, 0.18600994],
+            [2.4747195, 1.9946594],
+            [2.0, 1.626944],
+            [2.0, 0.14663999],
+            [0.5973753, 0.540478],
+            [0.14415829, 0.068876386],
+        ]);
+        let edges = vec![
+            (0, 1),
+            (1, 7),
+            (2, 8),
+            (4, 5),
+            (5, 6),
+            (6, 2),
+            (6, 8),
+            (7, 4),
+            (7, 6),
+            (8, 9),
+            (8, 9),
+            (9, 0),
+            (9, 7),
+        ];
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
+
+        // Result should have one copy of edge 8->9
+        assert_eq!(result.iter().filter(|&&e| e == (8, 9)).count(), 1);
     }
 }

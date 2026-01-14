@@ -126,7 +126,7 @@ impl<G: Kernel, T: std::fmt::Debug> std::fmt::Debug for SweepLineStatus<G, T> {
     }
 }
 
-impl<G: Kernel, T> SweepLineStatus<G, T> {
+impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Create a new empty status structure
     pub fn new() -> Self {
         Self {
@@ -148,8 +148,10 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
             matches!(ord, Ordering::Less)
         });
 
+        println!("Before remove, stautus is {:?} and we want to remove {:?}", self, i);
         let removed = self.entries.remove(i);
         assert_eq!(target_segment, &removed.segment);
+        println!("After remove, stautus is {:?}", self);
 
         return removed;
     }
@@ -237,6 +239,7 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
             matches!(ord, Ordering::Less | Ordering::Equal)
         });
         self.entries.insert(pos, entry);
+        println!("After insert, status is {:?}", self);
     }
 
     /// Insert a new entry at the appropriate position for the given event point
@@ -258,7 +261,7 @@ impl<G: Kernel, T> SweepLineStatus<G, T> {
     }
 }
 
-impl<G: Kernel, T> Default for SweepLineStatus<G, T> {
+impl<G: Kernel, T: std::fmt::Debug> Default for SweepLineStatus<G, T> {
     fn default() -> Self {
         Self::new()
     }

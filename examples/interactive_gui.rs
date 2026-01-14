@@ -69,6 +69,10 @@ struct InteractiveDemo {
     show_clipped: bool,
     show_triangulation: bool,
     winding_rule: WindingRule,
+
+    // Drag state
+    dragging_vertex: Option<usize>,
+    pointer_near_vertex: bool,
 }
 
 struct ProcessingResults {
@@ -94,6 +98,12 @@ impl ProcessingResults {
 
         // Step 1: Clean the edges (remove intersections)
         let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());
+        let cleaned_edges = clean(&mut kernel, cleaned_edges.iter().copied()); // XXX
+        let cleaned_edges = clean(&mut kernel, cleaned_edges.iter().copied()); // XXX
+
+        dbg!(&kernel);
+        dbg!(&input_edges);
+        dbg!(&cleaned_edges);
 
         // Step 2: Clip with selected winding rule
         let winding_fn = winding_rule.as_function();
@@ -206,25 +216,25 @@ impl InteractiveDemo {
             [0.0, 0.0],
             [2.0, 0.0],
             [2.0, 2.0],
-            [0.0, 2.0],
+            //[0.0, 2.0],
             // Second square (4-7), offset to create overlap
             [1.0, 1.0],
             [3.0, 1.0],
             [3.0, 3.0],
-            [1.0, 3.0],
+            //[1.0, 3.0],
         ];
 
         let input_edges = vec![
             // First square
             (0, 1),
             (1, 2),
-            (2, 3),
-            (3, 0),
+            (2, 0),
+            //(3, 0),
             // Second square
+            (3, 4),
             (4, 5),
-            (5, 6),
-            (6, 7),
-            (7, 4),
+            (5, 3),
+            //(7, 4),
         ];
         let winding_rule = WindingRule::NonZero;
         let processing_results =
@@ -239,6 +249,8 @@ impl InteractiveDemo {
             show_clipped: true,
             show_triangulation: true,
             winding_rule,
+            dragging_vertex: None,
+            pointer_near_vertex: false,
         }
     }
 
@@ -366,11 +378,72 @@ impl eframe::App for InteractiveDemo {
         // Main plot area
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.heading("Shape2D Geometry Processing Demo");
+            ui.label("Click and drag input vertices to see real-time updates");
 
-            Plot::new("geometry_plot")
+            // Disable plot dragging/scrolling when near a vertex or actively dragging
+            let allow_plot_interaction =
+                self.dragging_vertex.is_none() && !self.pointer_near_vertex;
+
+            let plot_response = Plot::new("geometry_plot")
                 .view_aspect(1.0)
                 .data_aspect(1.0)
+                .allow_drag(allow_plot_interaction)
+                .allow_scroll(allow_plot_interaction)
                 .show(ui, |plot_ui| {
+                    // Handle vertex dragging
+                    let pointer_pos = plot_ui.pointer_coordinate();
+                    let pointer_down = plot_ui.ctx().input(|i| i.pointer.primary_down());
+                    let pointer_released = plot_ui.ctx().input(|i| i.pointer.primary_released());
+
+                    // Check if pointer is near a vertex
+                    let mut near_vertex = false;
+                    if let Some(pos) = pointer_pos {
+                        let drag_threshold = 0.15; // Distance threshold in plot coordinates
+                        for &vertex in self.input_vertices.iter() {
+                            let dx = vertex[0] as f64 - pos.x;
+                            let dy = vertex[1] as f64 - pos.y;
+                            let dist = (dx * dx + dy * dy).sqrt();
+                            if dist < drag_threshold {
+                                near_vertex = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    // Start dragging if clicking near a vertex
+                    if pointer_down && self.dragging_vertex.is_none() {
+                        if let Some(pos) = pointer_pos {
+                            let drag_threshold = 0.15; // Distance threshold in plot coordinates
+                            for (i, &vertex) in self.input_vertices.iter().enumerate() {
+                                let dx = vertex[0] as f64 - pos.x;
+                                let dy = vertex[1] as f64 - pos.y;
+                                let dist = (dx * dx + dy * dy).sqrt();
+                                if dist < drag_threshold {
+                                    self.dragging_vertex = Some(i);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    // Update vertex position while dragging
+                    if let Some(vertex_idx) = self.dragging_vertex {
+                        if pointer_down {
+                            if let Some(pos) = pointer_pos {
+                                self.input_vertices[vertex_idx] = [pos.x as f32, pos.y as f32];
+                                // Reprocess geometry in real-time
+                                self.processing_results = ProcessingResults::process(
+                                    &self.input_vertices,
+                                    &self.input_edges,
+                                    self.winding_rule,
+                                );
+                            }
+                        } else if pointer_released {
+                            // Stop dragging
+                            self.dragging_vertex = None;
+                        }
+                    }
+
                     // Layer 1: Triangulation (filled, drawn first so it's underneath)
                     if self.show_triangulation {
                         // Draw filled triangles
@@ -424,15 +497,25 @@ impl eframe::App for InteractiveDemo {
                             );
                         }
 
-                        // Draw input vertices
-                        let input_verts = self
-                            .processing_results
-                            .edges_to_vertices(&self.processing_results.input_edges);
-                        if !input_verts.is_empty() {
+                        // Draw input vertices (with highlighting for draggable/dragged)
+                        for (i, &vertex) in self.input_vertices.iter().enumerate() {
+                            let pos = [vertex[0] as f64, vertex[1] as f64];
+                            let is_dragging = self.dragging_vertex == Some(i);
+
+                            let (color, radius) = if is_dragging {
+                                // Highlight the vertex being dragged
+                                (egui::Color32::from_rgb(255, 255, 0), 6.0)
+                            } else {
+                                // Normal input vertex
+                                (egui::Color32::from_rgb(200, 200, 200), 5.0)
+                            };
+
                             plot_ui.points(
-                                Points::new(input_verts)
-                                    .color(egui::Color32::from_rgb(200, 200, 200))
-                                    .radius(4.0),
+                                Points::new(vec![pos])
+                                    .color(color)
+                                    .radius(radius)
+                                    .shape(egui_plot::MarkerShape::Circle)
+                                    .filled(true),
                             );
                         }
                     }
@@ -494,7 +577,13 @@ impl eframe::App for InteractiveDemo {
                             );
                         }
                     }
+
+                    // Return whether pointer is near a vertex for next frame
+                    near_vertex
                 });
+
+            // Update state for next frame
+            self.pointer_near_vertex = plot_response.inner;
         });
     }
 }

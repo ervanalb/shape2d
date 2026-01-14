@@ -28,9 +28,9 @@ pub trait TriangleKernel {
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering;
 }
 
-/// Concrete implementation of TriangleKernel for f32 coordinates
+#[derive(Debug, Clone)]
 pub struct F32TriangleKernel {
-    vertices: Vec<[f32; 2]>,
+    pub vertices: Vec<[f32; 2]>,
 }
 
 impl F32TriangleKernel {

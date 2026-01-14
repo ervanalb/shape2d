@@ -6,12 +6,13 @@ use crate::{
     triangle_kernel::{F32TriangleKernel, TriangleKernel},
 };
 
+#[derive(Debug, Clone)]
 pub struct F32 {
-    vertices: Vec<[f32; 2]>,
+    pub vertices: Vec<[f32; 2]>,
 }
 
 impl F32 {
-    const EPSILON: f32 = 1e-5;
+    const EPSILON: f32 = 0.1; // XXX
 
     pub fn new(vertices: Vec<[f32; 2]>) -> Self {
         Self { vertices }
