@@ -288,7 +288,7 @@ fn process_event_pair<G: Kernel>(
                 event_b,
                 monotone_events,
                 status,
-            );
+            )?;
         }
         (
             SweepLineEventType::End,
@@ -326,7 +326,7 @@ fn process_event_pair<G: Kernel>(
                 event_b,
                 monotone_events,
                 status,
-            );
+            )?;
         }
         (
             SweepLineEventType::End,
@@ -402,9 +402,10 @@ fn handle_end_vertex<G: Kernel>(
     upper_event: &SweepLineEvent<G>,
     monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-) {
+) -> Result<(), TriangulationError> {
     // Search status & remove lower segment, noting helper H & component index I
-    let segment_below = status.remove(geometry, pt, &lower_event.segment);
+    let segment_below = status.remove(geometry, pt, &lower_event.segment)
+        .ok_or(TriangulationError::Topology)?;
     dbg!(&segment_below);
 
     // Output lower segment with index I, chain Bottom
@@ -463,6 +464,8 @@ fn handle_end_vertex<G: Kernel>(
             SweepLineChain::Top,
         );
     }
+
+    Ok(())
 }
 
 /// Handle split vertex
@@ -640,7 +643,8 @@ fn handle_merge_vertex<G: Kernel>(
 ) -> Result<(), TriangulationError> {
     // Search status & remove upper segment, noting its index I2 and helper H2
     let (segment_below, upper_segment) =
-        status.get_below_mut_and_remove(geometry, pt, &upper_event.segment);
+        status.get_below_mut_and_remove(geometry, pt, &upper_event.segment)
+            .ok_or(TriangulationError::Topology)?;
     let segment_below = segment_below.ok_or(TriangulationError::Topology)?;
 
     // Handle lower segment
@@ -758,9 +762,10 @@ fn handle_bottom_vertex<G: Kernel>(
     right_event: &SweepLineEvent<G>,
     monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
     status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-) {
+) -> Result<(), TriangulationError> {
     // Search status & remove left segment, noting its index I and helper H
-    let left_segment = status.remove(geometry, pt, &left_event.segment);
+    let left_segment = status.remove(geometry, pt, &left_event.segment)
+        .ok_or(TriangulationError::Topology)?;
 
     // Output left segment with index I, chain Bottom
     output_edge_segment(
@@ -833,6 +838,8 @@ fn handle_bottom_vertex<G: Kernel>(
             ),
         );
     }
+
+    Ok(())
 }
 
 /// Handle top vertex

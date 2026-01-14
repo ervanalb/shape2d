@@ -3,6 +3,26 @@ use std::collections::{BTreeMap, btree_map::Entry};
 use crate::kernel::{Edge, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
 use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
 
+/// Error type for clipping operations
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClippingError {
+    /// Invalid topology encountered during clipping
+    /// For example:
+    /// * segment not found in sweep line status when expected
+    /// * inconsistent winding numbers
+    InvalidTopology,
+}
+
+impl std::fmt::Display for ClippingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ClippingError::InvalidTopology => write!(f, "Invalid topology encountered during clipping"),
+        }
+    }
+}
+
+impl std::error::Error for ClippingError {}
+
 /// Edge direction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Direction {
@@ -27,14 +47,13 @@ struct StatusData {
 /// * `winding_rule` - Function that takes a winding number and returns true if it's "inside"
 ///
 /// # Returns
-/// A list of edges wound positively around the "inside" area
-// TODO(Claude): Have this function return a Result, which may potentially be a Topology error
-// (e.g. if status.remove() returns None)
+/// A list of edges wound positively around the "inside" area, or a ClippingError if
+/// invalid topology is encountered.
 pub fn clip<K: Kernel>(
     geometry: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     winding_rule: impl Fn(i32) -> bool,
-) -> Vec<K::Edge> {
+) -> Result<Vec<K::Edge>, ClippingError> {
     // Build sorted event queue
     let events = build_event_queue(geometry, edges);
 
@@ -65,7 +84,7 @@ fn sweep_line<K: Kernel>(
     geometry: &mut K,
     events: Vec<SweepLineEvent<K>>,
     winding_rule: impl Fn(i32) -> bool,
-) -> Vec<K::Edge> {
+) -> Result<Vec<K::Edge>, ClippingError> {
     let mut status = SweepLineStatus::<K, StatusData>::new();
     let mut output: BTreeMap<K::Edge, Direction> = BTreeMap::new();
 
@@ -74,7 +93,8 @@ fn sweep_line<K: Kernel>(
             SweepLineEventType::End => {
                 // Find and remove the edge from status
                 let event_point = geometry.sweep_line_event_point(event);
-                status.remove(geometry, event_point, &event.segment);
+                status.remove(geometry, event_point, &event.segment)
+                    .ok_or(ClippingError::InvalidTopology)?;
             }
             SweepLineEventType::Start => {
                 // Find insertion point in status
@@ -141,13 +161,13 @@ fn sweep_line<K: Kernel>(
     }
 
     // Output relevant edges, reversing them if necessary
-    output
+    Ok(output
         .iter()
         .map(|(&edge, dir)| match dir {
             Direction::Forward => edge,
             Direction::Reverse => edge.reversed(),
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -163,7 +183,7 @@ mod tests {
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Positive winding rule
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0).unwrap();
 
         // All edges should be in the output
         assert_eq!(result.len(), 4);
@@ -175,7 +195,7 @@ mod tests {
         let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0]]);
         let edges: Vec<(u32, u32)> = vec![];
 
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0).unwrap();
         assert_eq!(result.len(), 0);
     }
 
@@ -210,11 +230,11 @@ mod tests {
         let cleaned_edges = clean(&mut kernel, edges.iter().copied());
         assert!(cleaned_edges.len() == 12);
 
-        let union = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 0);
+        let union = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 0).unwrap();
         // 4 edges lie on the interior and should have been clipped
         assert!(union.len() == 8);
 
-        let intersection = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 1);
+        let intersection = clip(&mut kernel, cleaned_edges.iter().copied(), |w| w > 1).unwrap();
         // Intersection is a square
         assert!(intersection.len() == 4);
     }
@@ -249,11 +269,11 @@ mod tests {
         ];
 
         // Positive winding rule shouldn't change kernel
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0).unwrap();
         assert_eq!(result.len(), 8);
 
         // Non-positive winding rule also shouldn't change kernel
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w <= 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w <= 0).unwrap();
         assert_eq!(result.len(), 8);
     }
 
@@ -264,7 +284,7 @@ mod tests {
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Rule that filters out everything
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 1);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 1).unwrap();
         assert_eq!(result.len(), 0);
     }
 
@@ -297,7 +317,7 @@ mod tests {
             (9, 0),
             (9, 7),
         ];
-        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0);
+        let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0).unwrap();
 
         // Result should have one copy of edge 8->9
         assert_eq!(result.iter().filter(|&&e| e == (8, 9)).count(), 1);

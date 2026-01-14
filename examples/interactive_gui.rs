@@ -101,20 +101,27 @@ impl ProcessingResults {
 
         // Step 2: Clip with selected winding rule
         let winding_fn = winding_rule.as_function();
-        let clipped_edges = clip(&mut kernel, cleaned_edges.iter().copied(), winding_fn);
+        let mut error = None;
+        let clipped_edges = match clip(&mut kernel, cleaned_edges.iter().copied(), winding_fn) {
+            Ok(edges) => edges,
+            Err(e) => {
+                error = Some(format!("Clipping error: {:?}", e));
+                eprintln!("Clipping error! {:?}", e);
+                dbg!(&kernel.vertices);
+                dbg!(&cleaned_edges);
+                Vec::new()
+            }
+        };
 
         // Step 3: Triangulate
-        let mut error = None;
         let mut triangle_kernel = TriangleKernel::new();
         let triangles = triangulate(&kernel, &mut triangle_kernel, clipped_edges.iter().copied())
             .unwrap_or_else(|e| {
                 error = Some(format!("Triangulation error: {:?}", e));
-
                 eprintln!("Triangulation error! {:?}", e);
                 dbg!(&kernel.vertices);
                 dbg!(&cleaned_edges);
                 dbg!(&clipped_edges);
-
                 Vec::new()
             });
 

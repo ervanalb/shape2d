@@ -136,24 +136,24 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
 
     /// Remove a segment from the status and return it
     ///
-    /// Panics if the segment is not found.
+    /// Returns None if the segment is not found or doesn't match the target.
     pub fn remove(
         &mut self,
         geometry: &G,
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
-    ) -> SweepLineStatusEntry<G, T> {
+    ) -> Option<SweepLineStatusEntry<G, T>> {
         let i = self.entries.partition_point(|entry| {
             let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
 
-        // TODO(Claude): have this function return None if the entry at the given index
-        // is not equal to the target_segment
-        let removed = self.entries.remove(i);
-        assert_eq!(target_segment, &removed.segment);
-
-        return removed;
+        // Check if the index is valid and the segment matches
+        if i < self.entries.len() && &self.entries[i].segment == target_segment {
+            Some(self.entries.remove(i))
+        } else {
+            None
+        }
     }
 
     /// Get a reference to the segment equal or below the given event point
@@ -199,29 +199,33 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Remove a segment from the status and return it,
     /// along a reference to the segment below it
     ///
-    /// Panics if the segment is not found.
+    /// Returns None if the segment is not found or doesn't match the target.
     pub fn get_below_mut_and_remove(
         &mut self,
         geometry: &G,
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
-    ) -> (
+    ) -> Option<(
         Option<&mut SweepLineStatusEntry<G, T>>,
         SweepLineStatusEntry<G, T>,
-    ) {
+    )> {
         let i = self.entries.partition_point(|entry| {
             let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
 
-        let removed = self.entries.remove(i);
-        assert_eq!(target_segment, &removed.segment);
-        let below = if i > 0 {
-            Some(&mut self.entries[i - 1])
+        // Check if the index is valid and the segment matches
+        if i < self.entries.len() && &self.entries[i].segment == target_segment {
+            let removed = self.entries.remove(i);
+            let below = if i > 0 {
+                Some(&mut self.entries[i - 1])
+            } else {
+                None
+            };
+            Some((below, removed))
         } else {
             None
-        };
-        (below, removed)
+        }
     }
 
     /// Insert a new entry at the appropriate position for the given event point
@@ -239,7 +243,6 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
             matches!(ord, Ordering::Less | Ordering::Equal)
         });
         self.entries.insert(pos, entry);
-        println!("After insert, status is {:?}", self);
     }
 
     /// Insert a new entry at the appropriate position for the given event point
