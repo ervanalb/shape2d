@@ -1,27 +1,45 @@
 use std::cmp::Ordering;
 
+const DEFAULT_EPSILON_F32: f32 = 0.1; // XXX
+
 use crate::{
     kernel::{Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     rtree::Rect,
     triangle_kernel::{F32TriangleKernel, TriangleKernel},
 };
 
-#[derive(Debug, Clone)]
-pub struct F32 {
-    pub vertices: Vec<[f32; 2]>,
+/// Trait for providing epsilon values to the F32 kernel
+pub trait EpsilonProviderF32 {
+    /// Returns the epsilon value to use for geometric comparisons
+    fn value(&self) -> f32;
 }
 
-impl F32 {
-    const EPSILON: f32 = 0.1; // XXX
-
-    pub fn new(vertices: Vec<[f32; 2]>) -> Self {
-        Self { vertices }
+/// Implementation for f32 - epsilon() returns the value itself
+impl EpsilonProviderF32 for f32 {
+    #[inline]
+    fn value(&self) -> f32 {
+        *self
     }
+}
 
-    pub fn vertex_count(&self) -> usize {
-        self.vertices.len()
+/// Constant epsilon provider - returns a compile-time constant
+#[derive(Debug)]
+pub struct ConstantEpsilon;
+
+impl EpsilonProviderF32 for ConstantEpsilon {
+    #[inline]
+    fn value(&self) -> f32 {
+        DEFAULT_EPSILON_F32
     }
+}
 
+#[derive(Debug, Clone)]
+pub struct F32<E: EpsilonProviderF32 = ConstantEpsilon> {
+    pub vertices: Vec<[f32; 2]>,
+    pub epsilon: E,
+}
+
+impl<E: EpsilonProviderF32> F32<E> {
     pub fn v(&self, i: u32) -> [f32; 2] {
         self.vertices[i as usize]
     }
@@ -33,7 +51,22 @@ impl F32 {
     }
 }
 
-impl Kernel for F32 {
+impl F32<ConstantEpsilon> {
+    pub fn new(vertices: Vec<[f32; 2]>) -> Self {
+        Self {
+            vertices,
+            epsilon: ConstantEpsilon,
+        }
+    }
+}
+
+impl<E: EpsilonProviderF32> F32<E> {
+    pub fn new_with_epsilon(vertices: Vec<[f32; 2]>, epsilon: E) -> Self {
+        Self { vertices, epsilon }
+    }
+}
+
+impl<E: EpsilonProviderF32> Kernel for F32<E> {
     type Vertex = u32;
     type Edge = (u32, u32);
     type Extents = ExtentsF32;
@@ -43,7 +76,7 @@ impl Kernel for F32 {
     type TriangleKernel = F32TriangleKernel;
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
-        points_coincident_f32(self.v(a), self.v(b), Self::EPSILON)
+        points_coincident_f32(self.v(a), self.v(b), self.epsilon.value())
     }
 
     fn edges_coincident(&self, _a: Self::Edge, _b: Self::Edge) -> bool {
@@ -57,7 +90,7 @@ impl Kernel for F32 {
             self.v(vertex),
             self.v(edge.0),
             self.v(edge.1),
-            Self::EPSILON,
+            self.epsilon.value(),
         )
     }
 
@@ -72,7 +105,7 @@ impl Kernel for F32 {
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
-            Self::EPSILON,
+            self.epsilon.value(),
         )?)
     }
 
@@ -91,12 +124,17 @@ impl Kernel for F32 {
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
         extents_f32(
             edges.flat_map(|(a, b)| [self.v(a), self.v(b)]),
-            Self::EPSILON,
+            self.epsilon.value(),
         )
     }
 
     fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect {
-        segment_bbox_f32(self.v(edge.0), self.v(edge.1), *extents, Self::EPSILON)
+        segment_bbox_f32(
+            self.v(edge.0),
+            self.v(edge.1),
+            *extents,
+            self.epsilon.value(),
+        )
     }
 
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {

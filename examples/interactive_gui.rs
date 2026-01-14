@@ -65,6 +65,7 @@ struct InteractiveDemo {
     show_clipped: bool,
     show_triangulation: bool,
     winding_rule: WindingRule,
+    epsilon: f32,
 
     // Drag state
     dragging_vertex: Option<usize>,
@@ -76,7 +77,7 @@ struct InteractiveDemo {
 }
 
 struct ProcessingResults {
-    kernel: Kernel,
+    kernel: Kernel<f32>,
     triangle_kernel: TriangleKernel,
     input_edges: Vec<(u32, u32)>,
     cleaned_edges: Vec<(u32, u32)>,
@@ -90,11 +91,12 @@ impl ProcessingResults {
         input_vertices: &[[f32; 2]],
         input_edges: &[(u32, u32)],
         winding_rule: WindingRule,
+        epsilon: f32,
     ) -> Self {
         let input_edges = input_edges.to_vec();
 
-        // Create kernel with vertices
-        let mut kernel = Kernel::new(input_vertices.to_vec());
+        // Create kernel with vertices and epsilon
+        let mut kernel = Kernel::new_with_epsilon(input_vertices.to_vec(), epsilon);
 
         // Step 1: Clean the edges (remove intersections)
         let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());
@@ -247,6 +249,7 @@ impl ProcessingResults {
 
 impl InteractiveDemo {
     fn new() -> Self {
+        /*
         let input_vertices = vec![
             [-0.2, 1.7],
             [2.3, 1.7],
@@ -276,57 +279,57 @@ impl InteractiveDemo {
             (9, 10),
             (10, 7),
         ];
-
-        /*
-                // Create three shapes: a star, rectangle, and triangle
-                // Star (5-pointed star, indices 0-9)
-                let input_vertices = vec![
-                    [1., 4.0],
-                    [1.2351141, 3.3236067],
-                    [1.9510565, 3.309017],
-                    [1.3804226, 2.8763933],
-                    [1.5877852, 2.190983],
-                    [1.0, 2.6],
-                    [0.41221482, 2.190983],
-                    [0.61957735, 2.8763933],
-                    [0.04894346, 3.309017],
-                    [0.76488584, 3.3236067],
-                    [-0.2, 1.7],
-                    [2.3, 1.7],
-                    [2.3, 4.2],
-                    [-0.2, 4.2],
-                    [1.3, 1.],
-                    [3., 1.],
-                    [3., 4.],
-                ];
-
-                let input_edges = vec![
-                    // Star edges (0-9)
-                    (0, 1),
-                    (1, 2),
-                    (2, 3),
-                    (3, 4),
-                    (4, 5),
-                    (5, 6),
-                    (6, 7),
-                    (7, 8),
-                    (8, 9),
-                    (9, 0),
-                    // Rectangle edges (10-13)
-                    (10, 11),
-                    (11, 12),
-                    (12, 13),
-                    (13, 10),
-                    // Triangle edges (14-16)
-                    (14, 15),
-                    (15, 16),
-                    (16, 14),
-                ];
         */
 
+        // Create three shapes: a star, rectangle, and triangle
+        // Star (5-pointed star, indices 0-9)
+        let input_vertices = vec![
+            [1., 4.0],
+            [1.2351141, 3.3236067],
+            [1.9510565, 3.309017],
+            [1.3804226, 2.8763933],
+            [1.5877852, 2.190983],
+            [1.0, 2.6],
+            [0.41221482, 2.190983],
+            [0.61957735, 2.8763933],
+            [0.04894346, 3.309017],
+            [0.76488584, 3.3236067],
+            [-0.2, 1.7],
+            [2.3, 1.7],
+            [2.3, 4.2],
+            [-0.2, 4.2],
+            [1.3, 1.],
+            [3., 1.],
+            [3., 4.],
+        ];
+
+        let input_edges = vec![
+            // Star edges (0-9)
+            (0, 1),
+            (1, 2),
+            (2, 3),
+            (3, 4),
+            (4, 5),
+            (5, 6),
+            (6, 7),
+            (7, 8),
+            (8, 9),
+            (9, 0),
+            // Rectangle edges (10-13)
+            (10, 11),
+            (11, 12),
+            (12, 13),
+            (13, 10),
+            // Triangle edges (14-16)
+            (14, 15),
+            (15, 16),
+            (16, 14),
+        ];
+
         let winding_rule = WindingRule::Positive;
+        let epsilon = 1e-5;
         let processing_results =
-            ProcessingResults::process(&input_vertices, &input_edges, winding_rule);
+            ProcessingResults::process(&input_vertices, &input_edges, winding_rule, epsilon);
 
         let edit_geometry_text = serde_json::to_string_pretty(&serde_json::json!({
             "vertices": input_vertices,
@@ -343,6 +346,7 @@ impl InteractiveDemo {
             show_clipped: true,
             show_triangulation: false,
             winding_rule,
+            epsilon,
             dragging_vertex: None,
             pointer_near_vertex: false,
             show_edit_popup: false,
@@ -380,8 +384,12 @@ impl InteractiveDemo {
 
         self.input_vertices = vertices;
         self.input_edges = edges;
-        self.processing_results =
-            ProcessingResults::process(&self.input_vertices, &self.input_edges, self.winding_rule);
+        self.processing_results = ProcessingResults::process(
+            &self.input_vertices,
+            &self.input_edges,
+            self.winding_rule,
+            self.epsilon,
+        );
 
         Ok(())
     }
@@ -488,6 +496,22 @@ impl eframe::App for InteractiveDemo {
                     &self.input_vertices,
                     &self.input_edges,
                     self.winding_rule,
+                    self.epsilon,
+                );
+            }
+
+            ui.separator();
+            ui.heading("Epsilon");
+            ui.label("Geometric tolerance:");
+            let epsilon_response =
+                ui.add(egui::Slider::new(&mut self.epsilon, 1e-5..=1.0).logarithmic(true));
+
+            if epsilon_response.changed() {
+                self.processing_results = ProcessingResults::process(
+                    &self.input_vertices,
+                    &self.input_edges,
+                    self.winding_rule,
+                    self.epsilon,
                 );
             }
 
@@ -582,6 +606,7 @@ impl eframe::App for InteractiveDemo {
                                     &self.input_vertices,
                                     &self.input_edges,
                                     self.winding_rule,
+                                    self.epsilon,
                                 );
                             }
                         } else if pointer_released {

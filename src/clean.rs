@@ -465,7 +465,7 @@ mod tests {
         // Should split into 4 edges
         assert_eq!(result.len(), 4);
         // Should create a new vertex at the intersection
-        assert_eq!(kernel.vertex_count(), 5);
+        assert_eq!(kernel.vertices.len(), 5);
     }
 
     #[test]
@@ -509,7 +509,7 @@ mod tests {
         // Square edges don't intersect, should remain 4 edges
         assert_eq!(result.len(), 4);
         // No new vertices should be created
-        assert_eq!(kernel.vertex_count(), 4);
+        assert_eq!(kernel.vertices.len(), 4);
     }
 
     #[test]
@@ -523,7 +523,7 @@ mod tests {
         // Should split into 4 edges meeting at center
         assert_eq!(result.len(), 4);
         // Should create intersection vertex at (0.5, 0.5)
-        assert_eq!(kernel.vertex_count(), 5);
+        assert_eq!(kernel.vertices.len(), 5);
     }
 
     #[test]
@@ -613,14 +613,17 @@ mod tests {
 
     #[test]
     fn test_complete_clean() {
-        let mut kernel = Kernel::new(vec![
-            [0.0, 0.0],
-            [2.0, 0.0],
-            [2.0, 2.0],
-            [1.0, 1.0],
-            [3.5337768, 0.99069494],
-            [3.118609, 2.8236988],
-        ]);
+        let mut kernel = Kernel::new_with_epsilon(
+            vec![
+                [0.0, 0.0],
+                [2.0, 0.0],
+                [2.0, 2.0],
+                [1.0, 1.0],
+                [3.5337768, 0.99069494],
+                [3.118609, 2.8236988],
+            ],
+            0.1,
+        );
 
         let edges = vec![(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)];
 
@@ -629,39 +632,4 @@ mod tests {
         let edges2 = clean(&mut kernel, edges.iter().copied());
         assert_eq!(edges, edges2);
     }
-
-    /*
-    #[test]
-    fn test_clean_intersection() {
-        let mut kernel = Kernel::new(vec![
-            [-0.20000000298023224, 1.7000000476837158],
-            [2.299999952316284, 1.7000000476837158],
-            [2.299999952316284, 4.199999809265137],
-            [-0.20000000298023224, 4.199999809265137],
-            [1.2999999523162842, 1.0],
-            [3.0, 1.0],
-            [3.0, 4.0],
-            [2.1789448261260986, 3.3461809158325195],
-            [1.4119443893432617, 2.943000316619873],
-            [2.0147764682769775, 1.0903263092041016],
-            [0.619388997554779, 2.941560983657837],
-        ]);
-        let edges = vec![
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 0),
-            (4, 5),
-            (5, 6),
-            (6, 4),
-            (7, 8),
-            (8, 9),
-            (9, 10),
-            (10, 7),
-        ];
-        let edges = clean(&mut kernel, edges.iter().copied());
-        //assert_eq!(edges, edges2);
-        panic!();
-    }
-    */
 }
