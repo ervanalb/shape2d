@@ -116,6 +116,9 @@ fn sweep_line<K: Kernel>(
                             SweepLineChain::Bottom => Direction::Reverse,
                         }
                     };
+                    // TODO: avoid this panic possibility
+                    // by handling each edge only once,
+                    // and using its multiplicity in the winding rule check.
                     match output.entry(event.segment.edge) {
                         Entry::Vacant(e) => {
                             e.insert(dir);

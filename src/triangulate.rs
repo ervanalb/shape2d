@@ -892,11 +892,13 @@ fn handle_top_vertex<G: Kernel>(
     }
 
     // (both cases) Output V with index I, chain Top
-    monotone_events.push(dbg!(MonotoneEvent {
-        vertex,
-        component: segment_below.data.component,
-        chain: SweepLineChain::Top,
-    }));
+    if segment_below.data.helper_vertex != vertex {
+        monotone_events.push(dbg!(MonotoneEvent {
+            vertex,
+            component: segment_below.data.component,
+            chain: SweepLineChain::Top,
+        }));
+    }
 
     // Edit status to set existing helper H to V (helper type: Top)
     segment_below.data.helper_vertex = vertex;
@@ -1779,5 +1781,33 @@ mod tests {
                 .count()
                 > 0
         );
+    }
+
+    #[test]
+    fn test_touching_triangles_2() {
+        let mut kernel = Kernel::new(vec![
+            [0.004632079, -0.001372324],
+            [2.0, 0.0],
+            [1.0135162, 2.9981308],
+            [-1.0050312, 0.9939545],
+            [0.22551377, 1.0972531],
+            [1.6716268, 0.9979948],
+            [0.34009355, 0.9959848],
+        ]);
+        let edges = vec![
+            (0, 1),
+            (1, 5),
+            (2, 6),
+            (3, 6),
+            (4, 3),
+            (5, 2),
+            (6, 0),
+            (6, 4),
+        ];
+
+        let mut triangle_kernel = F32TriangleKernel::new();
+        let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
+        verify_triangulation(&triangle_kernel, &triangles);
+        assert_eq!(triangles.len(), 4);
     }
 }

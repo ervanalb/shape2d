@@ -118,6 +118,9 @@ impl ProcessingResults {
                 Vec::new()
             });
 
+        println!("Triangle vertices: {:?}", triangle_kernel.vertices);
+        println!("Triangle indices: {:?}", triangles);
+
         Self {
             kernel,
             triangle_kernel,
@@ -158,36 +161,66 @@ impl ProcessingResults {
     }
 
     fn triangles_to_polygons(&self) -> Vec<Vec<[f64; 2]>> {
+        const MIN_AREA_THRESHOLD: f32 = 0.001; // Minimum triangle area to render
+
         self.triangles
             .iter()
-            .map(|&(v0, v1, v2)| {
+            .filter_map(|&(v0, v1, v2)| {
                 let p0 = self.triangle_kernel.v(v0);
                 let p1 = self.triangle_kernel.v(v1);
                 let p2 = self.triangle_kernel.v(v2);
 
-                vec![
+                // Filter out small sliver triangles by calculating area
+                // Area = 0.5 * |cross product of two edge vectors|
+                let edge1_x = p1[0] - p0[0];
+                let edge1_y = p1[1] - p0[1];
+                let edge2_x = p2[0] - p0[0];
+                let edge2_y = p2[1] - p0[1];
+                let cross = edge1_x * edge2_y - edge1_y * edge2_x;
+                let area = cross.abs() * 0.5;
+
+                if area < MIN_AREA_THRESHOLD {
+                    return None; // Skip small sliver triangles
+                }
+
+                Some(vec![
                     [p0[0] as f64, p0[1] as f64],
                     [p1[0] as f64, p1[1] as f64],
                     [p2[0] as f64, p2[1] as f64],
-                ]
+                ])
             })
             .collect()
     }
 
     fn triangles_to_arrows(&self) -> Vec<([f64; 2], [f64; 2])> {
+        const MIN_AREA_THRESHOLD: f32 = 0.001;
+
         self.triangles
             .iter()
-            .flat_map(|&(v0, v1, v2)| {
+            .filter_map(|&(v0, v1, v2)| {
                 let p0 = self.triangle_kernel.v(v0);
                 let p1 = self.triangle_kernel.v(v1);
                 let p2 = self.triangle_kernel.v(v2);
 
-                [
+                // Filter out small sliver triangles
+                let edge1_x = p1[0] - p0[0];
+                let edge1_y = p1[1] - p0[1];
+                let edge2_x = p2[0] - p0[0];
+                let edge2_y = p2[1] - p0[1];
+                let cross = edge1_x * edge2_y - edge1_y * edge2_x;
+                let area = cross.abs() * 0.5;
+
+                if area < MIN_AREA_THRESHOLD {
+                    return None;
+                }
+
+                Some([
                     ([p0[0] as f64, p0[1] as f64], [p1[0] as f64, p1[1] as f64]),
                     ([p1[0] as f64, p1[1] as f64], [p2[0] as f64, p2[1] as f64]),
                     ([p2[0] as f64, p2[1] as f64], [p0[0] as f64, p0[1] as f64]),
-                ]
+                ])
             })
+            .flatten()
             .collect()
     }
 
