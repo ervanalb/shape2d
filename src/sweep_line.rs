@@ -230,8 +230,6 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
 
     /// Insert a new entry at the appropriate position for the given event point
     /// behind any entries that are equal.
-    /// Used to maintain proper status ordering
-    /// when processing events in sweep-line order.
     pub fn insert(
         &mut self,
         geometry: &G,
@@ -241,24 +239,6 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
         let pos = self.entries.partition_point(|e| {
             let ord = geometry.sweep_line_segment_cmp(&e.segment, event_point);
             matches!(ord, Ordering::Less | Ordering::Equal)
-        });
-        self.entries.insert(pos, entry);
-    }
-
-    /// Insert a new entry at the appropriate position for the given event point
-    /// in front of any entries that are equal.
-    /// Used to maintain proper status ordering
-    /// when processing events in reverse sweep-line order
-    /// (e.g. start events sorted clockwise)
-    pub fn insert_front(
-        &mut self,
-        geometry: &G,
-        event_point: G::SweepLineEventPoint,
-        entry: SweepLineStatusEntry<G, T>,
-    ) {
-        let pos = self.entries.partition_point(|e| {
-            let ord = geometry.sweep_line_segment_cmp(&e.segment, event_point);
-            matches!(ord, Ordering::Less)
         });
         self.entries.insert(pos, entry);
     }

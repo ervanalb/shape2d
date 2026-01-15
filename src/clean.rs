@@ -140,7 +140,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
         // Build the R-tree
         let r_tree = RTree::build(hilbert_to_rect);
 
-        dbg!(&edge_info);
 
         Self {
             kernel,
@@ -213,7 +212,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
             // Get edge info
             let dirty_info = &self.edge_info.get(&dirty_edge).unwrap();
 
-            println!("Processing dirty edge {:?}", dirty_edge);
 
             let mut action: Option<Action<K>> = None;
             'itest: {
@@ -319,7 +317,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 self.dirty_set.pop_first();
             }
 
-            println!("  * Action needed: {:?}", action);
             // Handle the action if one was found
             match action {
                 Some(Action::CancelEdges { e1, e2 }) => {
@@ -345,7 +342,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 Some(Action::MergeVertices { v1, v2 }) => {
                     // Add merged vertex as a new vertex
                     let merged_vertex = self.kernel.merged_vertex(v1, v2);
-                    println!("New merged vertex: {merged_vertex:?}");
 
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
@@ -388,7 +384,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 }) => {
                     // Add split point as a new vertex
                     let new_split_vertex = self.kernel.push_vertex(pt);
-                    println!("New split vertex: {new_split_vertex:?}");
 
                     // Update all edges referencing old_split_vertex
                     while let Some(edge) = { self.edges_for_vertex(old_split_vertex).next() } {
@@ -415,7 +410,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     pt: intersection,
                 }) => {
                     let vertex = self.kernel.push_vertex(intersection);
-                    println!("New intersection vertex: {vertex:?}");
                     let (edge_a1, edge_a2) = self.kernel.split_edge(edge_a, vertex);
                     let (edge_b1, edge_b2) = self.kernel.split_edge(edge_b, vertex);
 
@@ -447,8 +441,6 @@ pub fn partial_clean<K: Kernel>(
 ) -> Vec<K::Edge> {
     let mut spatial_index = SpatialIndex::new(kernel, edges);
     spatial_index.clean();
-    println!("After clean:");
-    dbg!(&spatial_index.edge_info);
     spatial_index.extract_edges()
 }
 
