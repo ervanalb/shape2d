@@ -11,9 +11,9 @@ fn main() -> eframe::Result {
     };
 
     eframe::run_native(
-        "Shape2D Interactive Demo",
+        "Shape2D Demo",
         options,
-        Box::new(|_cc| Ok(Box::new(InteractiveDemo::new()))),
+        Box::new(|_cc| Ok(Box::new(Demo::new()))),
     )
 }
 
@@ -31,7 +31,7 @@ impl WindingRule {
             WindingRule::Positive => "Positive",
             WindingRule::NonZero => "Non-Zero",
             WindingRule::EvenOdd => "Even-Odd",
-            WindingRule::GreaterOrEqual2 => "Intersection (>=2)",
+            WindingRule::GreaterOrEqual2 => "2 or more (Intersection)",
         }
     }
 
@@ -54,7 +54,7 @@ impl WindingRule {
     }
 }
 
-struct InteractiveDemo {
+struct Demo {
     input_vertices: Vec<[f32; 2]>,
     input_edges: Vec<(u32, u32)>,
     processing_results: ProcessingResults,
@@ -232,40 +232,8 @@ impl ProcessingResults {
     }
 }
 
-impl InteractiveDemo {
+impl Demo {
     fn new() -> Self {
-        /*
-        let input_vertices = vec![
-            [-0.2, 1.7],
-            [2.3, 1.7],
-            [2.3, 4.2],
-            [-0.2, 4.2],
-            [1.3, 1.],
-            [3., 1.],
-            [3., 4.],
-            [0., 0.],
-            [0., 0.],
-            [0., 0.],
-            [0., 0.],
-        ];
-        let input_edges = vec![
-            // Rectangle edges (0-3)
-            (0, 1),
-            (1, 2),
-            (2, 3),
-            (3, 0),
-            // Triangle edges (4-6)
-            (4, 5),
-            (5, 6),
-            (6, 4),
-            // Hole
-            (7, 8),
-            (8, 9),
-            (9, 10),
-            (10, 7),
-        ];
-        */
-
         // Create three shapes: a star, rectangle, and triangle
         // Star (5-pointed star, indices 0-9)
         let input_vertices = vec![
@@ -445,10 +413,21 @@ impl InteractiveDemo {
     }
 }
 
-impl eframe::App for InteractiveDemo {
+impl eframe::App for Demo {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Sidebar
-        egui::SidePanel::left("controls").show(ctx, |ui| {
+        egui::SidePanel::left("controls").default_width(400.).show(ctx, |ui| {
+            ui.heading("About");
+            ui.separator();
+            ui.label(
+                "Shape2D is a geometry library. This demo showcases three of its algorithms:
+ * Cleaning: Snapping together almost-equal geometry, and adding missing intersection points
+ * Clipping: Removing and reversing edges that aren't on the boundary
+ * Triangulation: Tesselating the interior with triangles
+ 
+It runs the input data through each of these steps sequentially, and shows you the output.
+",
+            );
             ui.heading("Display Options");
             ui.separator();
 
@@ -460,7 +439,25 @@ impl eframe::App for InteractiveDemo {
             ui.checkbox(&mut self.show_triangulation, "Show Triangulation");
 
             ui.separator();
+            ui.heading("Epsilon");
+            ui.label(concat!("This defines how close geometry needs to get before it is considered coincident.",
+            "Generally it is kept at a very small constant value, just large enough to encompass floating-point rounding errors.",
+            "It is exposed here to make it easier to explore edge-cases that generally only happen on a microscopic level."));
+            let epsilon_response =
+                ui.add(egui::Slider::new(&mut self.epsilon, 1e-5..=1.0).logarithmic(true));
+
+            if epsilon_response.changed() {
+                self.processing_results = ProcessingResults::process(
+                    &self.input_vertices,
+                    &self.input_edges,
+                    self.winding_rule,
+                    self.epsilon,
+                );
+            }
+
+            ui.separator();
             ui.heading("Winding Rule");
+            ui.label("This defines how overlapping shapes are treated by the clipping step.");
 
             let current_rule = self.winding_rule;
             egui::ComboBox::from_id_salt("winding_rule")
@@ -484,24 +481,8 @@ impl eframe::App for InteractiveDemo {
                     self.epsilon,
                 );
             }
-
             ui.separator();
-            ui.heading("Epsilon");
-            ui.label("Geometric tolerance:");
-            let epsilon_response =
-                ui.add(egui::Slider::new(&mut self.epsilon, 1e-5..=1.0).logarithmic(true));
-
-            if epsilon_response.changed() {
-                self.processing_results = ProcessingResults::process(
-                    &self.input_vertices,
-                    &self.input_edges,
-                    self.winding_rule,
-                    self.epsilon,
-                );
-            }
-
-            ui.separator();
-            if ui.button("Edit Geometry...").clicked() {
+            if ui.button("Edit Geometry as JSON...").clicked() {
                 self.sync_text_from_data();
                 self.show_edit_popup = true;
             }
@@ -524,16 +505,19 @@ impl eframe::App for InteractiveDemo {
                 ui.color_edit_button_srgba_unmultiplied(&mut [100, 149, 237, 255]);
                 ui.label("Triangulation");
             });
+            ui.separator();
+            ui.heading("Errors");
             if let Some(e) = &self.processing_results.error {
-                ui.separator();
-                ui.label(e);
+                ui.colored_label(egui::Color32::RED, e);
+            } else {
+                ui.label("No errors");
             }
         });
 
         // Main plot area
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("Shape2D Geometry Processing Demo");
-            ui.label("Click and drag input vertices to see real-time updates");
+            ui.heading("Shape2D Demo");
+            ui.label("Click and drag input vertices");
 
             // Disable plot dragging/scrolling when near a vertex or actively dragging
             let allow_plot_interaction =
