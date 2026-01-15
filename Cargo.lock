@@ -626,6 +626,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "console_error_panic_hook"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a06aeb73f470f66dcdbf7223caeebb85984942f22f1adb2a088cf9668146bbbc"
+dependencies = [
+ "cfg-if",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2238,15 +2248,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "polygon"
-version = "0.1.0"
-dependencies = [
- "eframe",
- "egui_plot",
- "serde_json",
-]
-
-[[package]]
 name = "portable-atomic"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2515,6 +2516,24 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "shape2d"
+version = "0.1.0"
+
+[[package]]
+name = "shape2d-demo"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "eframe",
+ "egui_plot",
+ "serde_json",
+ "shape2d",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]
@@ -2894,9 +2913,9 @@ checksum = "f6ccf251212114b54433ec949fd6a7841275f9ada20dddd2f29e9ceea4501493"
 
 [[package]]
 name = "unicode-width"
-version = "0.1.14"
+version = "0.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dd6e30e90baa6f72411720665d41d89b9a3d039dc45b8faea1ddd07f617f6af"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "url"
