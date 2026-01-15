@@ -445,8 +445,42 @@ impl Demo {
     }
 }
 
+impl Demo {
+    fn colors(&self, ctx: &egui::Context) -> ColorScheme {
+        let is_light = ctx.style().visuals.dark_mode == false;
+
+        if is_light {
+            ColorScheme {
+                input: egui::Color32::from_rgb(140, 140, 140), // Darker gray
+                cleaned: egui::Color32::from_rgb(200, 100, 0), // Darker orange
+                clipped: egui::Color32::from_rgb(0, 180, 0),   // Darker green
+                triangulation: egui::Color32::from_rgb(100, 120, 180), // Darker blue
+                triangulation_fill: egui::Color32::from_rgba_unmultiplied(100, 120, 180, 128),
+            }
+        } else {
+            ColorScheme {
+                input: egui::Color32::from_rgb(200, 200, 200), // Light gray
+                cleaned: egui::Color32::from_rgb(255, 165, 0), // Orange
+                clipped: egui::Color32::from_rgb(0, 255, 0),   // Bright green
+                triangulation: egui::Color32::from_rgb(100, 149, 237), // Cornflower blue
+                triangulation_fill: egui::Color32::from_rgba_unmultiplied(100, 149, 237, 128),
+            }
+        }
+    }
+}
+
+struct ColorScheme {
+    input: egui::Color32,
+    cleaned: egui::Color32,
+    clipped: egui::Color32,
+    triangulation: egui::Color32,
+    triangulation_fill: egui::Color32,
+}
+
 impl eframe::App for Demo {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let colors = self.colors(ctx);
+
         // Sidebar
         egui::SidePanel::left("controls").default_width(400.).show(ctx, |ui| {
             ui.heading("About");
@@ -472,8 +506,8 @@ It runs the input data through each of these steps sequentially, and shows you t
 
             ui.separator();
             ui.heading("Epsilon");
-            ui.label(concat!("This defines how close geometry needs to get before it is considered coincident.",
-            "Generally it is kept at a very small constant value, just large enough to encompass floating-point rounding errors.",
+            ui.label(concat!("This defines how close geometry needs to get before it is considered coincident. ",
+            "Generally it is kept at a very small constant value, just large enough to encompass floating-point rounding errors. ",
             "It is exposed here to make it easier to explore edge-cases that generally only happen on a microscopic level."));
             let epsilon_response =
                 ui.add(egui::Slider::new(&mut self.epsilon, 1e-5..=1.0).logarithmic(true));
@@ -522,19 +556,23 @@ It runs the input data through each of these steps sequentially, and shows you t
             ui.separator();
             ui.heading("Legend");
             ui.horizontal(|ui| {
-                ui.color_edit_button_srgba_unmultiplied(&mut [200, 200, 200, 255]);
+                let mut color = colors.input.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
                 ui.label("Input");
             });
             ui.horizontal(|ui| {
-                ui.color_edit_button_srgba_unmultiplied(&mut [255, 165, 0, 255]);
+                let mut color = colors.cleaned.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
                 ui.label("Cleaned");
             });
             ui.horizontal(|ui| {
-                ui.color_edit_button_srgba_unmultiplied(&mut [0, 255, 0, 255]);
+                let mut color = colors.clipped.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
                 ui.label("Clipped");
             });
             ui.horizontal(|ui| {
-                ui.color_edit_button_srgba_unmultiplied(&mut [100, 149, 237, 255]);
+                let mut color = colors.triangulation.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
                 ui.label("Triangulation");
             });
             ui.separator();
@@ -622,9 +660,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         for triangle_points in self.processing_results.triangles_to_polygons() {
                             plot_ui.polygon(
                                 PlotPolygon::new("", triangle_points)
-                                    .fill_color(egui::Color32::from_rgba_unmultiplied(
-                                        100, 149, 237, 128,
-                                    ))
+                                    .fill_color(colors.triangulation_fill)
                                     .stroke(egui::Stroke::NONE),
                             );
                         }
@@ -635,14 +671,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         // Draw triangle edges as arrows
                         let triangle_arrows = self.processing_results.triangles_to_arrows();
                         for (origin, tip) in triangle_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                egui::Color32::from_rgb(100, 149, 237),
-                                2.0,
-                                0.08,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.triangulation, 2.0, 0.08);
                         }
 
                         // Draw triangle vertices
@@ -650,7 +679,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         if !triangle_verts.is_empty() {
                             plot_ui.points(
                                 Points::new("", triangle_verts)
-                                    .color(egui::Color32::from_rgb(100, 149, 237))
+                                    .color(colors.triangulation)
                                     .radius(3.0),
                             );
                         }
@@ -662,14 +691,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.input_edges);
                         for (origin, tip) in input_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                egui::Color32::from_rgb(200, 200, 200),
-                                2.5,
-                                0.08,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.input, 2.5, 0.08);
                         }
 
                         // Draw input vertices (with highlighting for draggable/dragged)
@@ -682,7 +704,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                                 (egui::Color32::from_rgb(255, 255, 0), 6.0)
                             } else {
                                 // Normal input vertex
-                                (egui::Color32::from_rgb(200, 200, 200), 5.0)
+                                (colors.input, 5.0)
                             };
 
                             plot_ui.points(
@@ -701,14 +723,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.cleaned_edges);
                         for (origin, tip) in cleaned_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                egui::Color32::from_rgb(255, 165, 0),
-                                2.0,
-                                0.08,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned, 2.0, 0.08);
                         }
 
                         // Draw cleaned vertices
@@ -718,7 +733,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         if !cleaned_verts.is_empty() {
                             plot_ui.points(
                                 Points::new("", cleaned_verts)
-                                    .color(egui::Color32::from_rgb(255, 165, 0))
+                                    .color(colors.cleaned)
                                     .radius(3.5),
                             );
                         }
@@ -730,14 +745,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.clipped_edges);
                         for (origin, tip) in clipped_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                egui::Color32::from_rgb(0, 255, 0),
-                                2.5,
-                                0.08,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped, 2.5, 0.08);
                         }
 
                         // Draw clipped vertices
@@ -747,7 +755,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         if !clipped_verts.is_empty() {
                             plot_ui.points(
                                 Points::new("", clipped_verts)
-                                    .color(egui::Color32::from_rgb(0, 255, 0))
+                                    .color(colors.clipped)
                                     .radius(4.0),
                             );
                         }
