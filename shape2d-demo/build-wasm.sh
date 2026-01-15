@@ -5,9 +5,19 @@ set -e
 cargo build --release --target wasm32-unknown-unknown
 
 # Install wasm-bindgen-cli if not already installed
+# Note: Version must match the wasm-bindgen dependency in Cargo.toml
+WASM_BINDGEN_VERSION="0.2.106"
 if ! command -v wasm-bindgen &> /dev/null; then
-    echo "Installing wasm-bindgen-cli..."
-    cargo install wasm-bindgen-cli
+    echo "Installing wasm-bindgen-cli v${WASM_BINDGEN_VERSION}..."
+    cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION}
+else
+    # Check if the installed version matches
+    INSTALLED_VERSION=$(wasm-bindgen --version | cut -d' ' -f2)
+    if [ "$INSTALLED_VERSION" != "$WASM_BINDGEN_VERSION" ]; then
+        echo "Warning: Installed wasm-bindgen-cli version ($INSTALLED_VERSION) doesn't match required version ($WASM_BINDGEN_VERSION)"
+        echo "Installing correct version..."
+        cargo install -f wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION}
+    fi
 fi
 
 # Generate JavaScript bindings
