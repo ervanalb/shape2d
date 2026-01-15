@@ -33,12 +33,13 @@ enum Action<K: Kernel> {
     SplitEdge {
         edge: K::Edge,
         split_vertex: K::Vertex,
+        pt: K::Point,
     },
     /// Split both edges at their intersection point
     SplitBothEdges {
         e1: K::Edge,
         e2: K::Edge,
-        intersection: K::Intersection,
+        pt: K::Point,
     },
 }
 
@@ -60,16 +61,16 @@ impl<K: Kernel> std::fmt::Debug for Action<K> {
                 .field("e1", e1)
                 .field("e2", e2)
                 .finish(),
-            Action::SplitEdge { edge, split_vertex } => f
+            Action::SplitEdge {
+                edge,
+                split_vertex,
+                pt: _,
+            } => f
                 .debug_struct("SplitEdge")
                 .field("edge", edge)
                 .field("split_vertex", split_vertex)
                 .finish(),
-            Action::SplitBothEdges {
-                e1,
-                e2,
-                intersection: _,
-            } => f
+            Action::SplitBothEdges { e1, e2, pt: _ } => f
                 .debug_struct("SplitBothEdges")
                 .field("e1", e1)
                 .field("e2", e2)
@@ -225,7 +226,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         }
                     }
                 }
-                println!("  * Test 1 ok");
 
                 // Iterate over all potentially intersecting edges
                 for hilbert_value in self.r_tree.search(&dirty_info.bbox) {
@@ -234,7 +234,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             // Don't bother checking this edge against itself
                             continue;
                         }
-                        println!("R-tree hit with edge {:?}", candidate_edge);
 
                         // Test 2: Check if these edges cancel
                         if dirty_edge.reversed() == candidate_edge {
@@ -244,7 +243,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
-                        println!("  * Test 2 ok (edges don't cancel)");
 
                         // Test 3: Check if these two edges are fully coincident
                         if self.kernel.edges_coincident(dirty_edge, candidate_edge) {
@@ -254,7 +252,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             });
                             break 'itest;
                         }
-                        println!("  * Test 3 ok (edges not coincident)");
 
                         // Test 4: Check for coincident vertices
                         for v1 in self.kernel.vertices_for_edge(dirty_edge) {
@@ -267,7 +264,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                 }
                             }
                         }
-                        println!("  * Test 4 ok (no coincident vertices)");
 
                         // Test 5: Check for vertex on edge
                         'v_on_e: for vertex in self.kernel.vertices_for_edge(dirty_edge) {
@@ -278,10 +274,11 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                     continue 'v_on_e;
                                 }
                             }
-                            if self.kernel.vertex_on_edge(vertex, candidate_edge) {
+                            if let Some(pt) = self.kernel.vertex_on_edge(vertex, candidate_edge) {
                                 action = Some(Action::SplitEdge {
                                     edge: candidate_edge,
                                     split_vertex: vertex,
+                                    pt,
                                 });
                                 break 'itest;
                             }
@@ -294,15 +291,15 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                                     continue 'v_on_e;
                                 }
                             }
-                            if self.kernel.vertex_on_edge(vertex, dirty_edge) {
+                            if let Some(pt) = self.kernel.vertex_on_edge(vertex, dirty_edge) {
                                 action = Some(Action::SplitEdge {
                                     edge: dirty_edge,
                                     split_vertex: vertex,
+                                    pt,
                                 });
                                 break 'itest;
                             }
                         }
-                        println!("  * Test 5 ok (no vertex on edge)");
 
                         // Test 6: Check for edge intersection
                         if let Some(intersection) =
@@ -311,11 +308,10 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                             action = Some(Action::SplitBothEdges {
                                 e1: dirty_edge,
                                 e2: candidate_edge,
-                                intersection,
+                                pt: intersection,
                             });
                             break 'itest;
                         }
-                        println!("  * Test 6 ok (no edge-edge intersection)");
                     }
                 }
 
@@ -385,8 +381,30 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     self.insert(new_e1, old_e1.hilbert_value, old_e1.multiplicity);
                     self.insert(new_e2, old_e1.hilbert_value, old_e2.multiplicity);
                 }
-                Some(Action::SplitEdge { edge, split_vertex }) => {
-                    let (new_e1, new_e2) = self.kernel.split_edge(edge, split_vertex);
+                Some(Action::SplitEdge {
+                    edge,
+                    split_vertex: old_split_vertex,
+                    pt,
+                }) => {
+                    // Add split point as a new vertex
+                    let new_split_vertex = self.kernel.push_vertex(pt);
+                    println!("New split vertex: {new_split_vertex:?}");
+
+                    // Update all edges referencing old_split_vertex
+                    while let Some(edge) = { self.edges_for_vertex(old_split_vertex).next() } {
+                        let new_edge = edge;
+                        let old = self.remove(edge);
+                        if let Some(new_edge) = self.kernel.replace_vertex_in_edge(
+                            new_edge,
+                            old_split_vertex,
+                            new_split_vertex,
+                        ) {
+                            self.insert(new_edge, old.hilbert_value, old.multiplicity);
+                        }
+                    }
+
+                    // Split the edge
+                    let (new_e1, new_e2) = self.kernel.split_edge(edge, new_split_vertex);
                     let old = self.remove(edge);
                     self.insert(new_e1, old.hilbert_value, old.multiplicity);
                     self.insert(new_e2, old.hilbert_value, old.multiplicity);
@@ -394,9 +412,9 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 Some(Action::SplitBothEdges {
                     e1: edge_a,
                     e2: edge_b,
-                    intersection,
+                    pt: intersection,
                 }) => {
-                    let vertex = self.kernel.intersection_vertex(intersection);
+                    let vertex = self.kernel.push_vertex(intersection);
                     println!("New intersection vertex: {vertex:?}");
                     let (edge_a1, edge_a2) = self.kernel.split_edge(edge_a, vertex);
                     let (edge_b1, edge_b2) = self.kernel.split_edge(edge_b, vertex);
@@ -631,5 +649,23 @@ mod tests {
         // Cleaning twice shouldn't change the result
         let edges2 = clean(&mut kernel, edges.iter().copied());
         assert_eq!(edges, edges2);
+    }
+
+    #[test]
+    fn test_halting() {
+        let mut kernel = Kernel::new_with_epsilon(
+            vec![
+                [0.04894346, 3.309017],
+                [1.0, 3.6618032],
+                [0.8928008, 2.950759],
+                [2.0, 3.4],
+            ],
+            0.7,
+        );
+
+        let edges = vec![(0, 1), (1, 3), (2, 3)];
+
+        clean(&mut kernel, edges.iter().copied());
+        // Clean shouldn't run forever
     }
 }

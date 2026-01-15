@@ -11,7 +11,7 @@ pub trait Kernel: Sized {
     type Vertex: Copy + Ord + Debug;
     type Edge: Edge;
     type Extents;
-    type Intersection;
+    type Point;
     type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleKernel: TriangleKernel;
@@ -22,11 +22,12 @@ pub trait Kernel: Sized {
     /// Check if two edges are coincident (fully overlap)
     fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> bool;
 
-    /// Check if this vertex lies on the edge from edge_start to edge_end
-    fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> bool;
+    /// Check if this vertex lies on the edge from edge_start to edge_end,
+    /// and if so, return the point on the edge nearest to the vertex
+    fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point>;
 
     /// See if two edges intersect
-    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Intersection>;
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point>;
 
     /// Merge two vertices, returning the merged result
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex;
@@ -36,8 +37,8 @@ pub trait Kernel: Sized {
     /// The two edges that are returned must either be equal or cancel.
     fn merged_edges(&mut self, a: Self::Edge, b: Self::Edge) -> (Self::Edge, Self::Edge);
 
-    /// Creates and returns the vertex for an intersection
-    fn intersection_vertex(&mut self, intersection: Self::Intersection) -> Self::Vertex;
+    /// Creates a new vertex from a given point (e.g. the result of intersection())
+    fn push_vertex(&mut self, pt: Self::Point) -> Self::Vertex;
 
     /// Generate an "extents" object from a list of edges,
     /// which is used when calculating the edge_bbox
@@ -59,7 +60,7 @@ pub trait Kernel: Sized {
     // Replaces instances of old_v with new_v in edge
     // This returns None if the resultant edge is a reflex edge with zero area.
     fn replace_vertex_in_edge(
-        &self,
+        &mut self,
         edge: Self::Edge,
         old_v: Self::Vertex,
         new_v: Self::Vertex,
