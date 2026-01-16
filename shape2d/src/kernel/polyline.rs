@@ -3,7 +3,7 @@ use std::cmp::Ordering;
 const DEFAULT_EPSILON_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{Kernel, VertexEvent},
+    kernel::{EdgeSide, Kernel, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{F32TriangleKernel, TriangleKernel},
@@ -275,7 +275,27 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     }
 
     fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering {
-        todo!();
+        let a_pt = self.v(select_vertex(a.event_type, a.edge));
+        let b_pt = self.v(select_vertex(b.event_type, b.edge));
+
+        // Compare first by event point (arbitrary; we'll pick sweep-line order)
+        sweep_line_cmp_f32(a_pt, b_pt)
+            // Then by incidence angle, we will have +X direction be the first,
+            // and go CCW from there
+            .then_with(|| {
+                let shared_pt = a_pt;
+                let a_other_pt = self.v(select_vertex(a.event_type.other(), a.edge));
+                let b_other_pt = self.v(select_vertex(b.event_type.other(), b.edge));
+
+                let a = [a_other_pt[0] - shared_pt[0], a_other_pt[1] - shared_pt[1]];
+                let b = [b_other_pt[0] - shared_pt[0], b_other_pt[1] - shared_pt[1]];
+
+                // Check coordinates to see if they're in different quadrants
+                quadrant_f32(a).cmp(&quadrant_f32(b)).then_with(||
+                    // Points are within 90 degrees of each other,
+                    // so we can use sin_cmp to compare them
+                        sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
+            })
     }
 }
 
@@ -283,6 +303,19 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
 pub struct ExtentsF32 {
     scale: [f32; 2],
     offset: [f32; 2],
+}
+
+#[inline]
+pub fn quadrant_f32([x, y]: [f32; 2]) -> u8 {
+    if y > 0. && x <= 0. {
+        1
+    } else if y <= 0. && x < 0. {
+        2
+    } else if y < 0. && x >= 0. {
+        3
+    } else {
+        0 // Also includes [0, 0]
+    }
 }
 
 #[inline]
@@ -294,14 +327,13 @@ pub fn sweep_line_cmp_f32(a: [f32; 2], b: [f32; 2]) -> Ordering {
 
 #[inline]
 pub fn sin_cmp_f32(common: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Ordering {
-    // Compute cross product: (a - origin) x (b - origin)
     let ax = a[0] - common[0];
     let ay = a[1] - common[1];
     let bx = b[0] - common[0];
     let by = b[1] - common[1];
-    let cross = ax * by - ay * bx;
 
-    cross.partial_cmp(&0.).unwrap_or(Ordering::Equal)
+    // Check sign of cross product
+    (ax * by).partial_cmp(&(ay * bx)).unwrap_or(Ordering::Equal)
 }
 
 #[inline]
@@ -474,6 +506,14 @@ fn sweep_line_select_vertex<T>(
         | (SweepLineEventType::End, SweepLineChain::Top) => edge.0,
         (SweepLineEventType::Start, SweepLineChain::Top)
         | (SweepLineEventType::End, SweepLineChain::Bottom) => edge.1,
+    }
+}
+
+#[inline]
+fn select_vertex<T>(event_type: EdgeSide, edge: (T, T)) -> T {
+    match event_type {
+        EdgeSide::Tail => edge.0,
+        EdgeSide::Head => edge.1,
     }
 }
 

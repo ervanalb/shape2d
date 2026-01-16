@@ -110,15 +110,31 @@ pub trait Edge: Copy + Ord + Debug {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum VertexEventType {
-    End,
-    Start,
+pub enum EdgeSide {
+    Tail,
+    Head,
+}
+
+impl EdgeSide {
+    pub fn other(self) -> Self {
+        match self {
+            EdgeSide::Tail => EdgeSide::Head,
+            EdgeSide::Head => EdgeSide::Tail,
+        }
+    }
+
+    pub fn select<T>(self, (a, b): (T, T)) -> T {
+        match self {
+            EdgeSide::Tail => a,
+            EdgeSide::Head => b,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct VertexEvent<K: Kernel> {
-    event_type: VertexEventType,
-    edge: K::Edge,
+    pub(crate) event_type: EdgeSide,
+    pub(crate) edge: K::Edge,
 }
 
 /*

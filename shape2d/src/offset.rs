@@ -1,156 +1,103 @@
-use crate::kernel::Kernel;
+use crate::kernel::{EdgeSide, Kernel, VertexEvent};
 
-/*
-pub fn offset_raw<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) -> Vec<K::Edge> {
-    let mut events = Vec::new();
-    for edge in edges {
-        for event in geometry.sweep_line_events_for_edge(edge) {
-            events.push(event);
-        }
-    }
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp_bottom_up(a, b));
-
-    // Iterate over events for each vertex
-    for vertex_events in events
-        .chunk_by(|a, b| geometry.sweep_line_event_point(a) == geometry.sweep_line_event_point(b))
-    {
-        let pt = geometry.sweep_line_event_point(&vertex_events[0]);
-        let vertex = geometry.sweep_line_event_point_to_triangle_vertex(triangle_kernel, pt);
-
-        let end_events_count =
-            vertex_events.partition_point(|a| matches!(a.event_type, SweepLineEventType::End));
-
-        // Handle pairs of end events
-        let (end_event_pairs, end_events_remainder) =
-            vertex_events[0..end_events_count].as_chunks::<2>();
-
-        let (start_event_pairs, start_events_remainder) =
-            vertex_events[end_events_count..].as_chunks::<2>();
-
-        if start_events_remainder.len() != end_events_remainder.len() {
-            return Err(TriangulationError::Topology);
-        }
-
-        let leftover_event = if start_events_remainder.len() == 1 {
-            let e1 = &end_events_remainder[0];
-            let e2 = &start_events_remainder[0];
-
-            let is_top = match (e1.segment.chain, e2.segment.chain) {
-                (SweepLineChain::Top, SweepLineChain::Top) => true,
-
-                (SweepLineChain::Bottom, SweepLineChain::Bottom) => false,
-                _ => return Err(TriangulationError::Topology),
-            };
-            Some((e1, e2, is_top))
-        } else {
-            None
-        };
-
-        // Handle pairs of end events
-        for [e1, e2] in end_event_pairs {
-            match (e1.segment.chain, e2.segment.chain) {
-                (SweepLineChain::Bottom, SweepLineChain::Top) => {
-                    // End(Bottom) + End(Top) = end vertex
-                    handle_end_vertex(
-                        geometry,
-                        triangle_kernel,
-                        pt,
-                        vertex,
-                        e1,
-                        e2,
-                        &mut monotone_events,
-                        &mut status,
-                    )?;
-                }
-                (SweepLineChain::Top, SweepLineChain::Bottom) => {
-                    // End(Top) + End(Bottom) = merge vertex
-                    handle_merge_vertex(
-                        geometry,
-                        triangle_kernel,
-                        pt,
-                        vertex,
-                        e1,
-                        e2,
-                        &mut monotone_events,
-                        &mut status,
-                    )?;
-                }
-                _ => {
-                    return Err(TriangulationError::Topology);
-                }
-            }
-        }
-
-        // If the leftover pair is a top vertex,
-        // handle it now, between end pairs and start pairs.
-        if let Some((e1, e2, true)) = leftover_event {
-            // End(Top) + Start(Top) = top vertex
-            handle_top_vertex(
-                geometry,
-                triangle_kernel,
-                pt,
-                vertex,
-                e1,
-                e2,
-                &mut monotone_events,
-                &mut status,
-            )?;
-        }
-
-        // Handle pairs of start events
-        for [e1, e2] in start_event_pairs {
-            match (e1.segment.chain, e2.segment.chain) {
-                (SweepLineChain::Bottom, SweepLineChain::Top) => {
-                    // Start(Top) + Start(Bottom) = start vertex
-                    handle_start_vertex(
-                        geometry,
-                        triangle_kernel,
-                        pt,
-                        vertex,
-                        e1,
-                        e2,
-                        &mut monotone_events,
-                        &mut status,
-                        &mut component_allocator,
-                    );
-                }
-                (SweepLineChain::Top, SweepLineChain::Bottom) => {
-                    // Start(Bottom) + Start(Top) = split vertex
-                    handle_split_vertex(
-                        geometry,
-                        triangle_kernel,
-                        pt,
-                        vertex,
-                        e1,
-                        e2,
-                        &mut monotone_events,
-                        &mut status,
-                        &mut component_allocator,
-                    )?;
-                }
-                _ => {
-                    return Err(TriangulationError::Topology);
-                }
-            }
-        }
-
-        // If the leftover pair is a bottom vertex,
-        // handle it last
-        if let Some((e1, e2, false)) = leftover_event {
-            // End(Bottom) + Start(Bottom) = bottom vertex
-            handle_bottom_vertex(
-                geometry,
-                triangle_kernel,
-                pt,
-                vertex,
-                e1,
-                e2,
-                &mut monotone_events,
-                &mut status,
-            )?;
-        }
-    }
-
-    Ok(monotone_events)
+/// Error type for offset operations.
+/// Passing in cleaned, clipped, manifold data to offset() should never cause an error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffsetError {
+    /// Invalid topology in the input geometry
+    /// For example:
+    /// * non-manifold geometry (open loops)
+    /// * areas with winding number that is not 0 or 1
+    Topology,
 }
-*/
+
+pub fn offset_raw<K: Kernel>(
+    kernel: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
+) -> Result<Vec<K::Edge>, OffsetError> {
+    // Go through all the edges.
+    // If the edge has endpoints, add an event for each endpoint to a list.
+    // if the edge has no endpoints, add it to the "lone edges" list.
+    let mut events = Vec::new();
+    let mut lone_edges = Vec::new();
+    for edge in edges {
+        if kernel.vertices_for_edge(edge).is_some() {
+            events.push(VertexEvent::<K> {
+                event_type: EdgeSide::Tail,
+                edge,
+            });
+            events.push(VertexEvent::<K> {
+                event_type: EdgeSide::Head,
+                edge,
+            });
+        } else {
+            lone_edges.push(edge);
+        }
+    }
+
+    // Sort the events, which will group vertices together,
+    // and order events around each vertex by incidence angle.
+    events.sort_by(|a, b| kernel.vertex_event_cmp(a, b));
+
+    // We will now pair up events of the form (Head, Tail)
+    // to establish the connectivity of the data.
+    // Each pair will be pushed to the edge_junctions list.
+    let mut edge_junctions = Vec::with_capacity(events.len() / 2);
+    for vertex_events in events.chunk_by(|a, b| {
+        a.event_type
+            .select(kernel.vertices_for_edge(a.edge).unwrap())
+            == b.event_type
+                .select(kernel.vertices_for_edge(b.edge).unwrap())
+    }) {
+        match vertex_events[0].event_type {
+            EdgeSide::Tail => {
+                // Edges are sorted CCW around the vertex.
+                // We want to find edges in [outgoing, incoming] pairs
+                // since the area between these is filled.
+                let (pairs, remainder) = vertex_events.as_chunks::<2>();
+                if remainder.len() > 0 {
+                    return Err(OffsetError::Topology);
+                }
+                for [outgoing, incoming] in pairs {
+                    if !matches!(
+                        (outgoing.event_type, incoming.event_type),
+                        (EdgeSide::Tail, EdgeSide::Head)
+                    ) {
+                        return Err(OffsetError::Topology);
+                    }
+                    edge_junctions.push((incoming.edge, outgoing.edge));
+                }
+            }
+            EdgeSide::Head => {
+                // If our first edge is incoming,
+                // we skip it so that we can get the parity right,
+                // and handle it at the end.
+                let (pairs, remainder) = vertex_events[1..].as_chunks::<2>();
+                if remainder.len() != 1 {
+                    return Err(OffsetError::Topology);
+                }
+                for [outgoing, incoming] in pairs {
+                    if !matches!(
+                        (outgoing.event_type, incoming.event_type),
+                        (EdgeSide::Tail, EdgeSide::Head)
+                    ) {
+                        return Err(OffsetError::Topology);
+                    }
+                    edge_junctions.push((incoming.edge, outgoing.edge));
+                }
+                // Handle the last + first
+                let [outgoing, incoming] = [&remainder[0], &vertex_events[0]];
+                if !matches!(
+                    (outgoing.event_type, incoming.event_type),
+                    (EdgeSide::Tail, EdgeSide::Head)
+                ) {
+                    return Err(OffsetError::Topology);
+                }
+                edge_junctions.push((incoming.edge, outgoing.edge));
+            }
+        }
+    }
+
+    // TODO: process edge_junctions and lone_edges, ofsetting each appropriately.
+    todo!();
+}
