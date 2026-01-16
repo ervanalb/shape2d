@@ -4,8 +4,7 @@ use std::cmp::Ordering;
 use std::fmt::Debug;
 pub mod polyline;
 
-// Re-export sweep-line types for convenience
-pub use crate::sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment};
+use crate::sweep_line::{SweepLineEvent, SweepLineSegment};
 
 pub trait Kernel: Sized {
     type Vertex: Copy + Ord + Debug;
@@ -54,8 +53,10 @@ pub trait Kernel: Sized {
     /// Less = b is clockwise from a (negative cross product)
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering;
 
-    // Returns the vertices which are endpoints for this edge
-    fn vertices_for_edge(&self, edge: Self::Edge) -> Few<Self::Vertex>;
+    // Returns the vertex that this edge starts at, and the vertex that this edge ends at.
+    // Returns None if this edge has no vertices (e.g. a circle.)
+    // These two vertices may be the same.
+    fn vertices_for_edge(&self, edge: Self::Edge) -> Option<(Self::Vertex, Self::Vertex)>;
 
     // Replaces instances of old_v with new_v in edge
     // This returns None if the resultant edge is a reflex edge with zero area.
@@ -75,11 +76,7 @@ pub trait Kernel: Sized {
         edge: Self::Edge,
     ) -> impl Iterator<Item = SweepLineEvent<Self>>;
 
-    fn sweep_line_event_cmp_bottom_up(
-        &self,
-        a: &SweepLineEvent<Self>,
-        b: &SweepLineEvent<Self>,
-    ) -> Ordering;
+    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering;
 
     fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint;
 
@@ -102,11 +99,7 @@ pub trait Kernel: Sized {
         segment: &SweepLineSegment<Self>,
     ) -> impl Iterator<Item = <Self::TriangleKernel as TriangleKernel>::Vertex>;
 
-    fn sweep_line_event_cmp_clockwise(
-        &self,
-        a: &SweepLineEvent<Self>,
-        b: &SweepLineEvent<Self>,
-    ) -> Ordering;
+    fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering;
 }
 
 pub trait Edge: Copy + Ord + Debug {
@@ -116,6 +109,19 @@ pub trait Edge: Copy + Ord + Debug {
     fn reversed(self) -> Self;
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum VertexEventType {
+    End,
+    Start,
+}
+
+#[derive(Debug, Clone)]
+pub struct VertexEvent<K: Kernel> {
+    event_type: VertexEventType,
+    edge: K::Edge,
+}
+
+/*
 pub enum Few<T> {
     Zero,
     One(T),
@@ -135,6 +141,7 @@ impl<T: Copy> Iterator for Few<T> {
         result
     }
 }
+*/
 
 impl Edge for (u32, u32) {
     const MIN: Self = (u32::MIN, u32::MIN);

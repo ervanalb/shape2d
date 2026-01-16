@@ -3,8 +3,9 @@ use std::cmp::Ordering;
 const DEFAULT_EPSILON_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{Few, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
+    kernel::{Kernel, VertexEvent},
     rtree::Rect,
+    sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{F32TriangleKernel, TriangleKernel},
 };
 
@@ -141,12 +142,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         sin_cmp_f32(self.v(common), self.v(a), self.v(b))
     }
 
-    fn vertices_for_edge(&self, edge: Self::Edge) -> Few<Self::Vertex> {
-        if edge.0 == edge.1 {
-            Few::One(edge.0)
-        } else {
-            Few::Two(edge.0, edge.1)
-        }
+    fn vertices_for_edge(&self, edge: Self::Edge) -> Option<(Self::Vertex, Self::Vertex)> {
+        Some((edge.0, edge.1))
     }
 
     fn replace_vertex_in_edge(
@@ -203,11 +200,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         .into_iter()
     }
 
-    fn sweep_line_event_cmp_bottom_up(
-        &self,
-        a: &SweepLineEvent<Self>,
-        b: &SweepLineEvent<Self>,
-    ) -> Ordering {
+    fn sweep_line_event_cmp(&self, a: &SweepLineEvent<Self>, b: &SweepLineEvent<Self>) -> Ordering {
         let a_pt = self.v(sweep_line_select_vertex(
             a.event_type,
             a.segment.chain,
@@ -281,43 +274,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         None.into_iter()
     }
 
-    fn sweep_line_event_cmp_clockwise(
-        &self,
-        a: &SweepLineEvent<Self>,
-        b: &SweepLineEvent<Self>,
-    ) -> Ordering {
-        let a_pt = self.v(sweep_line_select_vertex(
-            a.event_type,
-            a.segment.chain,
-            a.segment.edge,
-        ));
-        let b_pt = self.v(sweep_line_select_vertex(
-            b.event_type,
-            b.segment.chain,
-            b.segment.edge,
-        ));
-
-        // Compare first by event point (sweep-line order)
-        sweep_line_cmp_f32(a_pt, b_pt)
-            // Then by event type (End before Start)
-            .then_with(|| a.event_type.cmp(&b.event_type))
-            // Then by incidence angle, clockwise
-            .then_with(|| {
-                let shared_event_type = a.event_type;
-                let shared_pt = a_pt;
-                let a_other_pt = self.v(sweep_line_select_vertex(
-                    shared_event_type.other(),
-                    a.segment.chain,
-                    a.segment.edge,
-                ));
-                let b_other_pt = self.v(sweep_line_select_vertex(
-                    shared_event_type.other(),
-                    b.segment.chain,
-                    b.segment.edge,
-                ));
-                // Clockwise sorting always uses the same order
-                sin_cmp_f32(shared_pt, a_other_pt, b_other_pt)
-            })
+    fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering {
+        todo!();
     }
 }
 

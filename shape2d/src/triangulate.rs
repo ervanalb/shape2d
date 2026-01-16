@@ -1,7 +1,9 @@
 use std::cmp::Ordering;
 
-use crate::kernel::{Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
-use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
+use crate::kernel::Kernel;
+use crate::sweep_line::{
+    SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineStatus, SweepLineStatusEntry,
+};
 use crate::triangle_kernel::TriangleKernel;
 
 /// Error type for triangulation operations.
@@ -107,7 +109,7 @@ fn partition_into_monotone<G: Kernel>(
             events.push(event);
         }
     }
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp_bottom_up(a, b));
+    events.sort_by(|a, b| geometry.sweep_line_event_cmp(a, b));
 
     // Iterate over events for each vertex
     for vertex_events in events

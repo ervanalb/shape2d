@@ -126,8 +126,9 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
             hilbert_to_edges.insert((hilbert_value, edge));
 
             // Add to vertex_to_edges
-            for vertex in kernel.vertices_for_edge(edge) {
-                vertex_to_edges.insert((vertex, edge));
+            if let Some((start_v, end_v)) = kernel.vertices_for_edge(edge) {
+                vertex_to_edges.insert((start_v, edge));
+                vertex_to_edges.insert((end_v, edge));
             }
 
             // Update hilbert_to_rect mapping
@@ -139,7 +140,6 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
 
         // Build the R-tree
         let r_tree = RTree::build(hilbert_to_rect);
-
 
         Self {
             kernel,
@@ -167,8 +167,9 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 });
 
                 self.hilbert_to_edges.insert((hilbert_value, edge));
-                for vertex in self.kernel.vertices_for_edge(edge) {
-                    self.vertex_to_edges.insert((vertex, edge));
+                if let Some((start_v, end_v)) = self.kernel.vertices_for_edge(edge) {
+                    self.vertex_to_edges.insert((start_v, edge));
+                    self.vertex_to_edges.insert((end_v, edge));
                 }
                 self.r_tree.enlarge(hilbert_value, bbox);
                 self.dirty_set.insert(edge);
@@ -184,8 +185,9 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
         };
         // Remove this edge completely
         let info = e.remove();
-        for vertex in self.kernel.vertices_for_edge(edge) {
-            self.vertex_to_edges.remove(&(vertex, edge));
+        if let Some((start_v, end_v)) = self.kernel.vertices_for_edge(edge) {
+            self.vertex_to_edges.remove(&(start_v, edge));
+            self.vertex_to_edges.remove(&(end_v, edge));
         }
         self.hilbert_to_edges.remove(&(info.hilbert_value, edge));
         self.dirty_set.remove(&edge);
@@ -212,16 +214,13 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
             // Get edge info
             let dirty_info = &self.edge_info.get(&dirty_edge).unwrap();
 
-
             let mut action: Option<Action<K>> = None;
             'itest: {
                 // Test 1: Check for coincident vertices within this edge
-                for v1 in self.kernel.vertices_for_edge(dirty_edge) {
-                    for v2 in self.kernel.vertices_for_edge(dirty_edge) {
-                        if v1 != v2 && self.kernel.vertices_coincident(v1, v2) {
-                            action = Some(Action::MergeVertices { v1, v2 });
-                            break 'itest;
-                        }
+                if let Some((v1, v2)) = self.kernel.vertices_for_edge(dirty_edge) {
+                    if v1 != v2 && self.kernel.vertices_coincident(v1, v2) {
+                        action = Some(Action::MergeVertices { v1, v2 });
+                        break 'itest;
                     }
                 }
 
@@ -252,8 +251,16 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         }
 
                         // Test 4: Check for coincident vertices
-                        for v1 in self.kernel.vertices_for_edge(dirty_edge) {
-                            for v2 in self.kernel.vertices_for_edge(candidate_edge) {
+                        if let Some((e1_start, e1_end)) = self.kernel.vertices_for_edge(dirty_edge)
+                            && let Some((e2_start, e2_end)) =
+                                self.kernel.vertices_for_edge(candidate_edge)
+                        {
+                            for (v1, v2) in [
+                                (e1_start, e2_start),
+                                (e1_start, e2_end),
+                                (e1_end, e2_start),
+                                (e1_end, e2_end),
+                            ] {
                                 if v1 != v2 && self.kernel.vertices_coincident(v1, v2) {
                                     {
                                         action = Some(Action::MergeVertices { v1, v2 });
@@ -264,38 +271,46 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         }
 
                         // Test 5: Check for vertex on edge
-                        'v_on_e: for vertex in self.kernel.vertices_for_edge(dirty_edge) {
-                            for v2 in self.kernel.vertices_for_edge(candidate_edge) {
-                                if vertex == v2 {
-                                    // Don't do vertex-on-edge test
-                                    // if this vertex is already an endpoint of the edge
-                                    continue 'v_on_e;
+
+                        if let Some((dirty_edge_start, dirty_edge_end)) =
+                            self.kernel.vertices_for_edge(dirty_edge)
+                            && let Some((candidate_edge_start, candidate_edge_end)) =
+                                self.kernel.vertices_for_edge(candidate_edge)
+                        {
+                            'v_on_e: for vertex in [dirty_edge_start, dirty_edge_end] {
+                                for v2 in [candidate_edge_start, candidate_edge_end] {
+                                    if vertex == v2 {
+                                        // Don't do vertex-on-edge test
+                                        // if this vertex is already an endpoint of the edge
+                                        continue 'v_on_e;
+                                    }
+                                }
+                                if let Some(pt) = self.kernel.vertex_on_edge(vertex, candidate_edge)
+                                {
+                                    action = Some(Action::SplitEdge {
+                                        edge: candidate_edge,
+                                        split_vertex: vertex,
+                                        pt,
+                                    });
+                                    break 'itest;
                                 }
                             }
-                            if let Some(pt) = self.kernel.vertex_on_edge(vertex, candidate_edge) {
-                                action = Some(Action::SplitEdge {
-                                    edge: candidate_edge,
-                                    split_vertex: vertex,
-                                    pt,
-                                });
-                                break 'itest;
-                            }
-                        }
-                        'v_on_e: for vertex in self.kernel.vertices_for_edge(candidate_edge) {
-                            for v2 in self.kernel.vertices_for_edge(dirty_edge) {
-                                if vertex == v2 {
-                                    // Don't do vertex-on-edge test
-                                    // if this vertex is already an endpoint of the edge
-                                    continue 'v_on_e;
+                            'v_on_e: for vertex in [candidate_edge_start, candidate_edge_end] {
+                                for v2 in [dirty_edge_start, dirty_edge_end] {
+                                    if vertex == v2 {
+                                        // Don't do vertex-on-edge test
+                                        // if this vertex is already an endpoint of the edge
+                                        continue 'v_on_e;
+                                    }
                                 }
-                            }
-                            if let Some(pt) = self.kernel.vertex_on_edge(vertex, dirty_edge) {
-                                action = Some(Action::SplitEdge {
-                                    edge: dirty_edge,
-                                    split_vertex: vertex,
-                                    pt,
-                                });
-                                break 'itest;
+                                if let Some(pt) = self.kernel.vertex_on_edge(vertex, dirty_edge) {
+                                    action = Some(Action::SplitEdge {
+                                        edge: dirty_edge,
+                                        split_vertex: vertex,
+                                        pt,
+                                    });
+                                    break 'itest;
+                                }
                             }
                         }
 
@@ -557,6 +572,7 @@ mod tests {
         // Horizontal and vertical intersect at [0.5, 0.5]
         // Diagonal intersects both at [0.5, 0.5]
         // So all three meet at one point, creating 6 edges
+        dbg!(&result);
         assert_eq!(result.len(), 6);
     }
 

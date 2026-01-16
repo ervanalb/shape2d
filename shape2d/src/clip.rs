@@ -1,7 +1,9 @@
 use std::collections::{BTreeMap, btree_map::Entry};
 
-use crate::kernel::{Edge, Kernel, SweepLineChain, SweepLineEvent, SweepLineEventType};
-use crate::sweep_line::{SweepLineStatus, SweepLineStatusEntry};
+use crate::kernel::{Edge, Kernel};
+use crate::sweep_line::{
+    SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineStatus, SweepLineStatusEntry,
+};
 
 /// Error type for clipping operations
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -16,7 +18,9 @@ pub enum ClippingError {
 impl std::fmt::Display for ClippingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClippingError::InvalidTopology => write!(f, "Invalid topology encountered during clipping"),
+            ClippingError::InvalidTopology => {
+                write!(f, "Invalid topology encountered during clipping")
+            }
         }
     }
 }
@@ -75,7 +79,7 @@ fn build_event_queue<K: Kernel>(
     }
 
     // Sort events
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp_bottom_up(a, b));
+    events.sort_by(|a, b| geometry.sweep_line_event_cmp(a, b));
     events
 }
 
@@ -93,7 +97,8 @@ fn sweep_line<K: Kernel>(
             SweepLineEventType::End => {
                 // Find and remove the edge from status
                 let event_point = geometry.sweep_line_event_point(event);
-                status.remove(geometry, event_point, &event.segment)
+                status
+                    .remove(geometry, event_point, &event.segment)
                     .ok_or(ClippingError::InvalidTopology)?;
             }
             SweepLineEventType::Start => {
@@ -108,8 +113,8 @@ fn sweep_line<K: Kernel>(
 
                 let winding_above = winding_below
                     + match event.segment.chain {
-                        crate::kernel::SweepLineChain::Bottom => 1,
-                        crate::kernel::SweepLineChain::Top => -1,
+                        SweepLineChain::Bottom => 1,
+                        SweepLineChain::Top => -1,
                     };
 
                 // Insert into status
