@@ -6,7 +6,7 @@ use crate::{
     kernel::{EdgeSide, Kernel, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
-    triangle_kernel::{F32TriangleKernel, TriangleKernel},
+    triangle_kernel::{TriangleKernel, TriangleKernelF32},
 };
 
 /// Trait for providing epsilon values to the F32 kernel
@@ -67,6 +67,13 @@ impl<E: EpsilonProviderF32> F32<E> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum CapStyleF32 {
+    Arc { tolerance: f32 },
+    Bevel,
+    Miter { limit: f32 },
+}
+
 impl<E: EpsilonProviderF32> Kernel for F32<E> {
     type Vertex = u32;
     type Edge = (u32, u32);
@@ -74,7 +81,9 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     type Point = [f32; 2];
     type SweepLineEdgePortion = ();
     type SweepLineEventPoint = u32;
-    type TriangleKernel = F32TriangleKernel;
+    type TriangleKernel = TriangleKernelF32;
+    type CapStyle = CapStyleF32;
+    type OffsetAmount = f32;
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         points_coincident_f32(self.v(a), self.v(b), self.epsilon.value())
@@ -296,6 +305,20 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     // so we can use sin_cmp to compare them
                         sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
             })
+    }
+
+    fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge {
+        todo!();
+    }
+
+    fn cap_edges(
+        &mut self,
+        incoming_edge: Self::Edge,
+        outgoing_edge: Self::Edge,
+        original_vertex: Self::Vertex,
+        cap_style: &Self::CapStyle,
+    ) -> Self::Edge {
+        todo!();
     }
 }
 

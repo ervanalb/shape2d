@@ -29,11 +29,11 @@ pub trait TriangleKernel {
 }
 
 #[derive(Debug, Clone)]
-pub struct F32TriangleKernel {
+pub struct TriangleKernelF32 {
     pub vertices: Vec<[f32; 2]>,
 }
 
-impl F32TriangleKernel {
+impl TriangleKernelF32 {
     pub fn new() -> Self {
         Self {
             vertices: Vec::new(),
@@ -55,7 +55,7 @@ impl F32TriangleKernel {
     }
 }
 
-impl TriangleKernel for F32TriangleKernel {
+impl TriangleKernel for TriangleKernelF32 {
     type Vertex = u32;
     type Triangle = (u32, u32, u32);
 

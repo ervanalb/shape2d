@@ -1,7 +1,7 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
 use shape2d::kernel::polyline::F32 as Kernel;
-use shape2d::triangle_kernel::F32TriangleKernel as TriangleKernel;
+use shape2d::triangle_kernel::TriangleKernelF32 as TriangleKernel;
 use shape2d::{clean, clip, triangulate};
 
 #[cfg(not(target_arch = "wasm32"))]

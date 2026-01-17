@@ -14,6 +14,8 @@ pub trait Kernel: Sized {
     type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleKernel: TriangleKernel;
+    type CapStyle: Debug;
+    type OffsetAmount: Copy + Debug;
 
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool;
@@ -100,6 +102,16 @@ pub trait Kernel: Sized {
     ) -> impl Iterator<Item = <Self::TriangleKernel as TriangleKernel>::Vertex>;
 
     fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering;
+
+    fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge;
+
+    fn cap_edges(
+        &mut self,
+        incoming_edge: Self::Edge,
+        outgoing_edge: Self::Edge,
+        original_vertex: Self::Vertex,
+        cap_style: &Self::CapStyle,
+    ) -> Self::Edge;
 }
 
 pub trait Edge: Copy + Ord + Debug {
@@ -136,28 +148,6 @@ pub struct VertexEvent<K: Kernel> {
     pub(crate) event_type: EdgeSide,
     pub(crate) edge: K::Edge,
 }
-
-/*
-pub enum Few<T> {
-    Zero,
-    One(T),
-    Two(T, T),
-}
-
-impl<T: Copy> Iterator for Few<T> {
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (result, next) = match self {
-            Self::Zero => (None, Self::Zero),
-            Self::One(a) => (Some(*a), Self::Zero),
-            Self::Two(a, b) => (Some(*a), Self::One(*b)),
-        };
-        *self = next;
-        result
-    }
-}
-*/
 
 impl Edge for (u32, u32) {
     const MIN: Self = (u32::MIN, u32::MIN);

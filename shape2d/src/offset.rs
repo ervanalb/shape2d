@@ -1,4 +1,9 @@
-use crate::kernel::{EdgeSide, Kernel, VertexEvent};
+use std::collections::BTreeMap;
+
+use crate::{
+    ClippingError, clean, clip,
+    kernel::{EdgeSide, Kernel, VertexEvent},
+};
 
 /// Error type for offset operations.
 /// Passing in cleaned, clipped, manifold data to offset() should never cause an error.
@@ -11,13 +16,22 @@ pub enum OffsetError {
     Topology,
 }
 
+impl From<ClippingError> for OffsetError {
+    fn from(value: ClippingError) -> OffsetError {
+        match value {
+            ClippingError::Topology => OffsetError::Topology,
+        }
+    }
+}
+
 pub fn offset_raw<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
+    cap_style: &K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     // Go through all the edges.
-    // If the edge has endpoints, add an event for each endpoint to a list.
-    // if the edge has no endpoints, add it to the "lone edges" list.
+    // If the edge has endpoints, add an event for each endpoint to a list,
+    // which will be used to establish topological connectivity.
     let mut events = Vec::new();
     let mut lone_edges = Vec::new();
     for edge in edges {
@@ -98,6 +112,50 @@ pub fn offset_raw<K: Kernel>(
         }
     }
 
-    // TODO: process edge_junctions and lone_edges, ofsetting each appropriately.
-    todo!();
+    let mut result_edges = Vec::new();
+
+    // Process lone edges, offsetting each appropriately.
+    for edge in lone_edges.into_iter() {
+        result_edges.push(kernel.offset_edge(edge));
+    }
+
+    // Process edges with endpoints, offsetting each appropriately,
+    // and tracking where they came from so they can be re-linked.
+    let mut original_to_offset = BTreeMap::new();
+    for edge in events.iter().filter_map(|event| match event.event_type {
+        EdgeSide::Tail => Some(event.edge),
+        EdgeSide::Head => None,
+    }) {
+        let offset_edge = kernel.offset_edge(edge);
+        original_to_offset.insert(edge, offset_edge);
+        result_edges.push(offset_edge);
+    }
+
+    // Process endpoints, adding caps as appropriate.
+    for (original_incoming_edge, original_outgoing_edge) in edge_junctions.into_iter() {
+        let &offset_incoming_edge = original_to_offset.get(&original_incoming_edge).unwrap();
+        let &offset_outgoing_edge = original_to_offset.get(&original_outgoing_edge).unwrap();
+
+        let (_, original_vertex) = kernel.vertices_for_edge(original_incoming_edge).unwrap();
+
+        result_edges.push(kernel.cap_edges(
+            offset_incoming_edge,
+            offset_outgoing_edge,
+            original_vertex,
+            cap_style,
+        ));
+    }
+
+    Ok(result_edges)
+}
+
+pub fn offset<K: Kernel>(
+    kernel: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
+    cap_style: &K::CapStyle,
+) -> Result<Vec<K::Edge>, OffsetError> {
+    let edges = offset_raw(kernel, edges, cap_style)?;
+    let edges = clean(kernel, edges.into_iter());
+    let edges = clip(kernel, edges.into_iter(), |w| w > 0)?;
+    Ok(edges)
 }

@@ -945,10 +945,10 @@ fn triangulate_monotone<TK: TriangleKernel>(
 mod tests {
     use super::*;
     use crate::kernel::polyline::F32 as Kernel;
-    use crate::triangle_kernel::F32TriangleKernel;
+    use crate::triangle_kernel::TriangleKernelF32;
 
     /// Helper to verify triangle winding and that all triangles reference valid vertices
-    fn verify_triangulation(triangle_kernel: &F32TriangleKernel, triangles: &[(u32, u32, u32)]) {
+    fn verify_triangulation(triangle_kernel: &TriangleKernelF32, triangles: &[(u32, u32, u32)]) {
         for &(i0, i1, i2) in triangles {
             let v0 = triangle_kernel.v(i0);
             let v1 = triangle_kernel.v(i1);
@@ -973,7 +973,7 @@ mod tests {
         // Simple triangle - has start, top, and end vertices
         let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 0)];
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -987,7 +987,7 @@ mod tests {
         let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1011,7 +1011,7 @@ mod tests {
             let edges = (0..sides).map(|i| (i, (i + 1) % sides));
 
             let mut kernel = Kernel::new(verts);
-            let mut triangle_kernel = F32TriangleKernel::new();
+            let mut triangle_kernel = TriangleKernelF32::new();
 
             let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges).unwrap();
 
@@ -1045,7 +1045,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1074,7 +1074,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1106,7 +1106,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1138,7 +1138,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1170,7 +1170,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1203,7 +1203,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1235,7 +1235,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1285,7 +1285,7 @@ mod tests {
             (7, 0),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1337,7 +1337,7 @@ mod tests {
             (5, 0),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1382,7 +1382,7 @@ mod tests {
             eprintln!("Testing comb: {}", desc);
             let mut kernel = Kernel::new(comb.to_vec());
 
-            let mut triangle_kernel = F32TriangleKernel::new();
+            let mut triangle_kernel = TriangleKernelF32::new();
 
             let triangles =
                 triangulate(&mut kernel, &mut triangle_kernel, edges.iter().copied()).unwrap();
@@ -1441,7 +1441,7 @@ mod tests {
             eprintln!("Testing degenerate comb: {}", desc);
             let mut kernel = Kernel::new(comb.to_vec());
 
-            let mut triangle_kernel = F32TriangleKernel::new();
+            let mut triangle_kernel = TriangleKernelF32::new();
 
             let triangles =
                 triangulate(&mut kernel, &mut triangle_kernel, edges.iter().copied()).unwrap();
@@ -1494,7 +1494,7 @@ mod tests {
             (12, 10),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1561,7 +1561,7 @@ mod tests {
             (8, 7),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
 
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
 
@@ -1610,7 +1610,7 @@ mod tests {
             (8, 6),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
         verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
@@ -1650,7 +1650,7 @@ mod tests {
             (8, 6),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
         verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);
@@ -1668,7 +1668,7 @@ mod tests {
         ]);
         let edges = vec![(0, 1), (1, 3), (2, 0), (3, 2), (3, 4), (4, 5), (5, 3)];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
         verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 3);
@@ -1710,7 +1710,7 @@ mod tests {
             (6, 4),
         ];
 
-        let mut triangle_kernel = F32TriangleKernel::new();
+        let mut triangle_kernel = TriangleKernelF32::new();
         let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges.into_iter()).unwrap();
         verify_triangulation(&triangle_kernel, &triangles);
         assert_eq!(triangles.len(), 4);

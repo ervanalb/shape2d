@@ -12,13 +12,13 @@ pub enum ClippingError {
     /// For example:
     /// * segment not found in sweep line status when expected
     /// * inconsistent winding numbers
-    InvalidTopology,
+    Topology,
 }
 
 impl std::fmt::Display for ClippingError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ClippingError::InvalidTopology => {
+            ClippingError::Topology => {
                 write!(f, "Invalid topology encountered during clipping")
             }
         }
@@ -99,7 +99,7 @@ fn sweep_line<K: Kernel>(
                 let event_point = geometry.sweep_line_event_point(event);
                 status
                     .remove(geometry, event_point, &event.segment)
-                    .ok_or(ClippingError::InvalidTopology)?;
+                    .ok_or(ClippingError::Topology)?;
             }
             SweepLineEventType::Start => {
                 // Find insertion point in status
