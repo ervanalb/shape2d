@@ -115,7 +115,6 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
-            self.epsilon.value(),
         )?)
     }
 
@@ -339,7 +338,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         let original_pt = self.v(original_vertex);
 
         {
-            // For a concave corner, draw lines to the original vertex
+            // For an interior corner, draw lines to the original vertex
             // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
             if matches!(
                 (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
@@ -359,9 +358,6 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 let dx_b = pt_b[0] - original_pt[0];
                 let dy_b = pt_b[1] - original_pt[1];
 
-                // Calculate radius from center to pt_a
-                let radius = (dx_a * dx_a + dy_a * dy_a).sqrt();
-
                 // Calculate the angle between the two vectors
                 let cross = dx_a * dy_b - dy_a * dx_b; // 2D cross product (z-component)
                 let dot = dx_a * dx_b + dy_a * dy_b; // dot product
@@ -370,7 +366,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 // Calculate maximum angle per segment based on tolerance
                 // The sagitta (deviation) of a chord from an arc is: s = r * (1 - cos(θ/2))
                 // Solving for θ when s = tolerance: θ = 2 * arccos(1 - tolerance/r)
-                let cos_arg = (1.0 - tolerance.max(self.epsilon.value()) / radius).clamp(-1.0, 1.0);
+                let cos_arg = (1.0 - tolerance.max(self.epsilon.value()) / offset_amount.abs())
+                    .clamp(-1.0, 1.0);
                 let max_angle_per_segment = 2.0 * cos_arg.acos();
                 let num_segments =
                     (delta_angle.abs() / max_angle_per_segment).ceil().max(1.) as u32;
@@ -504,9 +501,33 @@ fn intersect_segments_f32(
     a_end: [f32; 2],
     b_start: [f32; 2],
     b_end: [f32; 2],
-    epsilon: f32,
 ) -> Option<[f32; 2]> {
     // TODO rewrite with Plucker coordinates
+
+    let intersection = intersect_lines_f32(a_start, a_end, b_start, b_end);
+
+    let a_vec = [a_end[0] - a_start[0], a_end[1] - a_start[1]];
+    let a_split = [intersection[0] - a_start[0], intersection[1] - a_start[1]];
+    let a_split_dot_a = dot_f32(a_split, a_vec);
+    let a_squared = dot_f32(a_vec, a_vec);
+
+    let b_vec = [b_end[0] - b_start[0], b_end[1] - b_start[1]];
+    let b_split = [intersection[0] - b_start[0], intersection[1] - b_start[1]];
+    let b_split_dot_b = dot_f32(b_split, b_vec);
+    let b_squared = dot_f32(b_vec, b_vec);
+
+    if a_split_dot_a > 0.
+        && a_split_dot_a < a_squared
+        && b_split_dot_b > 0.
+        && b_split_dot_b < b_squared
+    {
+        Some(intersection)
+    } else {
+        None
+    }
+
+    ////////
+    /*
 
     let da_x = a_end[0] - a_start[0];
     let da_y = a_end[1] - a_start[1];
@@ -545,6 +566,7 @@ fn intersect_segments_f32(
     } else {
         None
     }
+    */
 }
 
 #[inline]
@@ -652,6 +674,11 @@ fn intersect_lines_f32(a1: [f32; 2], a2: [f32; 2], b1: [f32; 2], b2: [f32; 2]) -
     // Divide out perspective coordinate
     let z_inv = 1. / intersection_h[2];
     [intersection_h[0] * z_inv, intersection_h[1] * z_inv]
+}
+
+#[inline]
+fn dot_f32(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
 }
 
 #[inline]
@@ -788,7 +815,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -803,7 +830,7 @@ mod tests {
         let b_start = [0.5, 0.0];
         let b_end = [0.5, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -818,7 +845,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(result.is_none());
     }
 
@@ -829,7 +856,7 @@ mod tests {
         let b_start = [0.6, 0.4];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(result.is_none());
     }
 
@@ -841,7 +868,7 @@ mod tests {
         let b_start = [0.5, 0.5];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         // Collinear segments return None (det is too small)
         assert!(result.is_none());
     }
@@ -853,7 +880,7 @@ mod tests {
         let b_start = [0.0, 0.0];
         let b_end = [1.0, 0.000001]; // Almost parallel
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         // Should be None because det is too small
         assert!(result.is_none());
     }

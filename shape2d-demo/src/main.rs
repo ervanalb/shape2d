@@ -146,7 +146,7 @@ struct Demo {
 
 const ARROW_SIZE: f64 = 0.04;
 const ARC_TOLERANCE: f32 = 0.001;
-const MITER_LIMIT: f32 = 0.5;
+const MITER_LIMIT: f32 = 1.;
 
 struct ProcessingResults {
     kernel: Kernel<f32>,
@@ -399,7 +399,7 @@ impl Demo {
         let winding_rule = WindingRule::Positive;
         let epsilon = 1e-5;
         let offset_amount = 0.1;
-        let cap_style = CapStyle::Bevel;
+        let cap_style = CapStyle::Arc;
         let processing_results = ProcessingResults::process(
             &input_vertices,
             &input_edges,
@@ -598,6 +598,7 @@ impl eframe::App for Demo {
                 "Shape2D is a geometry library. This demo showcases three of its algorithms:
  * Cleaning: Snapping together almost-equal geometry, and adding missing intersection points
  * Clipping: Removing and reversing edges that aren't on the boundary
+ * Offsetting: Moving edges along their normal direction, and adding caps to the junctions
  * Triangulation: Tesselating the interior with triangles
  
 It runs the input data through each of these steps sequentially, and shows you the output.
@@ -612,8 +613,8 @@ It runs the input data through each of these steps sequentially, and shows you t
             ui.checkbox(&mut self.show_cleaned, "Show Cleaned Edges");
             ui.checkbox(&mut self.show_clipped, "Show Clipped Result");
             ui.checkbox(&mut self.show_raw_offset, "Show Raw Offset Edges");
-            ui.checkbox(&mut self.show_cleaned_offset, "Show Cleaned Offset Edges");
-            ui.checkbox(&mut self.show_clipped_offset, "Show Clipped Offset Edges");
+            ui.checkbox(&mut self.show_cleaned_offset, "Show Raw Offset Edges (cleaned)");
+            ui.checkbox(&mut self.show_clipped_offset, "Show Final Offset Edges (clipped)");
             ui.checkbox(&mut self.show_triangulation, "Show Triangulation");
 
             ui.separator();
@@ -665,11 +666,10 @@ It runs the input data through each of these steps sequentially, and shows you t
             }
 
             ui.separator();
-            ui.heading("Offset Settings");
+            ui.heading("Offset Amount");
 
             let offset_response = ui.add(
                 egui::Slider::new(&mut self.offset_amount, -1.0..=1.0)
-                    .text("Offset Amount")
                     .step_by(0.05)
             );
 
@@ -684,6 +684,8 @@ It runs the input data through each of these steps sequentially, and shows you t
                 );
             }
 
+            ui.separator();
+            ui.heading("Offset Cap Style");
             let current_cap = self.cap_style;
             let mut cap_changed = false;
             egui::ComboBox::from_id_salt("cap_style")
@@ -741,12 +743,12 @@ It runs the input data through each of these steps sequentially, and shows you t
             ui.horizontal(|ui| {
                 let mut color = colors.cleaned_offset.to_array();
                 ui.color_edit_button_srgba_unmultiplied(&mut color);
-                ui.label("Cleaned Offset");
+                ui.label("Raw Offset (cleaned)");
             });
             ui.horizontal(|ui| {
                 let mut color = colors.clipped_offset.to_array();
                 ui.color_edit_button_srgba_unmultiplied(&mut color);
-                ui.label("Clipped Offset");
+                ui.label("Final Offset (clipped)");
             });
             ui.horizontal(|ui| {
                 let mut color = colors.triangulation.to_array();
