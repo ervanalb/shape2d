@@ -311,8 +311,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         let a_pt = self.v(edge.0);
         let b_pt = self.v(edge.1);
 
-        let offset_x = a_pt[1] - a_pt[1]; // -Y
-        let offset_y = b_pt[0] - a_pt[0]; // X
+        let offset_x = b_pt[1] - a_pt[1]; // Y
+        let offset_y = a_pt[0] - b_pt[0]; // -X
         let norm_factor = offset / offset_x.hypot(offset_y);
         let offset_x = offset_x * norm_factor;
         let offset_y = offset_y * norm_factor;
@@ -328,6 +328,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         incoming_edge: Self::Edge,
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
+        offset_amount: Self::OffsetAmount,
         cap_style: &Self::CapStyle,
         mut emit_edge: impl FnMut(Self::Edge),
     ) {
@@ -337,11 +338,17 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         let pt_b = self.v(ix_b);
         let original_pt = self.v(original_vertex);
 
-        // For a concave corner, draw lines to the original vertex
-        // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
-        if matches!(sin_cmp_f32(original_pt, pt_a, pt_b), Ordering::Less) {
-            emit_edge((ix_a, original_vertex));
-            emit_edge((original_vertex, ix_b));
+        {
+            // For a concave corner, draw lines to the original vertex
+            // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
+            if matches!(
+                (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
+                (Ordering::Less, true) | (Ordering::Greater, false)
+            ) {
+                emit_edge((ix_a, original_vertex));
+                emit_edge((original_vertex, ix_b));
+                return;
+            }
         }
 
         match cap_style {
@@ -358,28 +365,26 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 // Calculate the angle between the two vectors
                 let cross = dx_a * dy_b - dy_a * dx_b; // 2D cross product (z-component)
                 let dot = dx_a * dx_b + dy_a * dy_b; // dot product
-                let mut delta_angle = cross.atan2(dot);
-                if delta_angle < 0. {
-                    delta_angle += std::f32::consts::TAU;
-                }
+                let delta_angle = cross.atan2(dot);
 
                 // Calculate maximum angle per segment based on tolerance
                 // The sagitta (deviation) of a chord from an arc is: s = r * (1 - cos(θ/2))
                 // Solving for θ when s = tolerance: θ = 2 * arccos(1 - tolerance/r)
                 let cos_arg = (1.0 - tolerance.max(self.epsilon.value()) / radius).clamp(-1.0, 1.0);
                 let max_angle_per_segment = 2.0 * cos_arg.acos();
-                let num_segments = (delta_angle / max_angle_per_segment).ceil().max(1.) as u32;
+                let num_segments =
+                    (delta_angle.abs() / max_angle_per_segment).ceil().max(1.) as u32;
 
                 // Interpolate the arc
                 let mut prev_vertex = ix_a;
                 let factor = delta_angle / num_segments as f32;
-                for i in 0..num_segments - 1 {
+                for i in 1..num_segments {
                     let theta = i as f32 * factor;
                     let c = theta.cos();
                     let s = theta.sin();
                     // Rotate [dx_a, dy_a] by theta
-                    let dx = c * dx_a + s * dy_a;
-                    let dy = -s * dx_a + c * dy_a;
+                    let dx = c * dx_a - s * dy_a;
+                    let dy = s * dx_a + c * dy_a;
                     let v = self.push_vertex([original_pt[0] + dx, original_pt[1] + dy]);
                     emit_edge((prev_vertex, v));
                     prev_vertex = v;

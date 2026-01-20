@@ -110,6 +110,7 @@ pub trait Kernel: Sized {
         incoming_edge: Self::Edge,
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
+        offset_amount: Self::OffsetAmount,
         cap_style: &Self::CapStyle,
         emit_edge: impl FnMut(Self::Edge),
     );

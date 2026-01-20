@@ -143,6 +143,7 @@ pub fn offset_raw<K: Kernel>(
             offset_incoming_edge,
             offset_outgoing_edge,
             original_vertex,
+            offset_amount,
             cap_style,
             |e| result_edges.push(e),
         );

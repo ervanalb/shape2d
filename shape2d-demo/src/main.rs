@@ -1,8 +1,8 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
-use shape2d::kernel::polyline::F32 as Kernel;
+use shape2d::kernel::polyline::{CapStyleF32, F32 as Kernel};
 use shape2d::triangle_kernel::TriangleKernelF32 as TriangleKernel;
-use shape2d::{clean, clip, triangulate};
+use shape2d::{clean, clip, offset_raw, triangulate};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
@@ -57,6 +57,13 @@ enum WindingRule {
     GreaterOrEqual2,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum CapStyle {
+    Arc,
+    Bevel,
+    Miter,
+}
+
 impl WindingRule {
     fn as_str(&self) -> &str {
         match self {
@@ -86,6 +93,30 @@ impl WindingRule {
     }
 }
 
+impl CapStyle {
+    fn as_str(&self) -> &str {
+        match self {
+            CapStyle::Arc => "Arc",
+            CapStyle::Bevel => "Bevel",
+            CapStyle::Miter => "Miter",
+        }
+    }
+
+    fn to_cap_style_f32(&self) -> CapStyleF32 {
+        match self {
+            CapStyle::Arc => CapStyleF32::Arc {
+                tolerance: ARC_TOLERANCE,
+            },
+            CapStyle::Bevel => CapStyleF32::Bevel,
+            CapStyle::Miter => CapStyleF32::Miter { limit: MITER_LIMIT },
+        }
+    }
+
+    fn all() -> [CapStyle; 3] {
+        [CapStyle::Arc, CapStyle::Bevel, CapStyle::Miter]
+    }
+}
+
 struct Demo {
     input_vertices: Vec<[f32; 2]>,
     input_edges: Vec<(u32, u32)>,
@@ -96,8 +127,13 @@ struct Demo {
     show_cleaned: bool,
     show_clipped: bool,
     show_triangulation: bool,
+    show_raw_offset: bool,
+    show_cleaned_offset: bool,
+    show_clipped_offset: bool,
     winding_rule: WindingRule,
     epsilon: f32,
+    offset_amount: f32,
+    cap_style: CapStyle,
 
     // Drag state
     dragging_vertex: Option<usize>,
@@ -108,12 +144,19 @@ struct Demo {
     edit_geometry_text: String,
 }
 
+const ARROW_SIZE: f64 = 0.04;
+const ARC_TOLERANCE: f32 = 0.001;
+const MITER_LIMIT: f32 = 0.5;
+
 struct ProcessingResults {
     kernel: Kernel<f32>,
     triangle_kernel: TriangleKernel,
     input_edges: Vec<(u32, u32)>,
     cleaned_edges: Vec<(u32, u32)>,
     clipped_edges: Vec<(u32, u32)>,
+    raw_offset_edges: Vec<(u32, u32)>,
+    cleaned_offset_edges: Vec<(u32, u32)>,
+    clipped_offset_edges: Vec<(u32, u32)>,
     triangles: Vec<(u32, u32, u32)>,
     error: Option<String>,
 }
@@ -124,6 +167,8 @@ impl ProcessingResults {
         input_edges: &[(u32, u32)],
         winding_rule: WindingRule,
         epsilon: f32,
+        offset_amount: f32,
+        cap_style: &CapStyleF32,
     ) -> Self {
         let input_edges = input_edges.to_vec();
 
@@ -147,17 +192,54 @@ impl ProcessingResults {
             }
         };
 
-        // Step 3: Triangulate
-        let mut triangle_kernel = TriangleKernel::new();
-        let triangles = triangulate(&kernel, &mut triangle_kernel, clipped_edges.iter().copied())
-            .unwrap_or_else(|e| {
-                error = Some(format!("Triangulation error: {:?}", e));
-                eprintln!("Triangulation error! {:?}", e);
+        // Step 3: Offset
+        let raw_offset_edges = match offset_raw(
+            &mut kernel,
+            clipped_edges.iter().copied(),
+            offset_amount,
+            cap_style,
+        ) {
+            Ok(edges) => edges,
+            Err(e) => {
+                error = Some(format!("Offset error: {:?}", e));
+                eprintln!("Offset error! {:?}", e);
                 dbg!(&kernel.vertices);
-                dbg!(&cleaned_edges);
                 dbg!(&clipped_edges);
                 Vec::new()
-            });
+            }
+        };
+
+        // Step 4: Clean again
+        let cleaned_offset_edges = clean(&mut kernel, raw_offset_edges.iter().copied());
+
+        // Step 5: Clip again
+        let clipped_offset_edges =
+            match clip(&mut kernel, cleaned_offset_edges.iter().copied(), |f| f > 0) {
+                Ok(edges) => edges,
+                Err(e) => {
+                    error = Some(format!("Clipping error: {:?}", e));
+                    eprintln!("Clipping error! {:?}", e);
+                    dbg!(&kernel.vertices);
+                    dbg!(&cleaned_offset_edges);
+                    Vec::new()
+                }
+            };
+
+        // Step 6: Triangulate
+        let mut triangle_kernel = TriangleKernel::new();
+        let triangles = triangulate(
+            &kernel,
+            &mut triangle_kernel,
+            clipped_offset_edges.iter().copied(),
+        )
+        .unwrap_or_else(|e| {
+            error = Some(format!("Triangulation error: {:?}", e));
+            eprintln!("Triangulation error! {:?}", e);
+            dbg!(&kernel.vertices);
+            dbg!(&cleaned_edges);
+            dbg!(&clipped_edges);
+            Vec::new()
+        });
 
         Self {
             kernel,
@@ -165,6 +247,9 @@ impl ProcessingResults {
             input_edges,
             cleaned_edges,
             clipped_edges,
+            raw_offset_edges,
+            cleaned_offset_edges,
+            clipped_offset_edges,
             triangles,
             error,
         }
@@ -313,8 +398,16 @@ impl Demo {
 
         let winding_rule = WindingRule::Positive;
         let epsilon = 1e-5;
-        let processing_results =
-            ProcessingResults::process(&input_vertices, &input_edges, winding_rule, epsilon);
+        let offset_amount = 0.1;
+        let cap_style = CapStyle::Bevel;
+        let processing_results = ProcessingResults::process(
+            &input_vertices,
+            &input_edges,
+            winding_rule,
+            epsilon,
+            offset_amount,
+            &cap_style.to_cap_style_f32(),
+        );
 
         let edit_geometry_text = serde_json::to_string_pretty(&serde_json::json!({
             "vertices": input_vertices,
@@ -330,8 +423,13 @@ impl Demo {
             show_cleaned: false,
             show_clipped: true,
             show_triangulation: false,
+            show_raw_offset: false,
+            show_cleaned_offset: false,
+            show_clipped_offset: true,
             winding_rule,
             epsilon,
+            offset_amount,
+            cap_style,
             dragging_vertex: None,
             pointer_near_vertex: false,
             show_edit_popup: false,
@@ -374,6 +472,8 @@ impl Demo {
             &self.input_edges,
             self.winding_rule,
             self.epsilon,
+            self.offset_amount,
+            &self.cap_style.to_cap_style_f32(),
         );
 
         Ok(())
@@ -456,6 +556,9 @@ impl Demo {
                 clipped: egui::Color32::from_rgb(0, 180, 0),   // Darker green
                 triangulation: egui::Color32::from_rgb(100, 120, 180), // Darker blue
                 triangulation_fill: egui::Color32::from_rgba_unmultiplied(100, 120, 180, 128),
+                raw_offset: egui::Color32::from_rgb(180, 0, 180), // Darker magenta
+                cleaned_offset: egui::Color32::from_rgb(0, 150, 180), // Darker cyan
+                clipped_offset: egui::Color32::from_rgb(180, 0, 0), // Darker red
             }
         } else {
             ColorScheme {
@@ -464,6 +567,9 @@ impl Demo {
                 clipped: egui::Color32::from_rgb(0, 255, 0),   // Bright green
                 triangulation: egui::Color32::from_rgb(100, 149, 237), // Cornflower blue
                 triangulation_fill: egui::Color32::from_rgba_unmultiplied(100, 149, 237, 128),
+                raw_offset: egui::Color32::from_rgb(255, 0, 255), // Bright magenta
+                cleaned_offset: egui::Color32::from_rgb(0, 255, 255), // Bright cyan
+                clipped_offset: egui::Color32::from_rgb(255, 100, 100), // Light red
             }
         }
     }
@@ -475,6 +581,9 @@ struct ColorScheme {
     clipped: egui::Color32,
     triangulation: egui::Color32,
     triangulation_fill: egui::Color32,
+    raw_offset: egui::Color32,
+    cleaned_offset: egui::Color32,
+    clipped_offset: egui::Color32,
 }
 
 impl eframe::App for Demo {
@@ -502,6 +611,9 @@ It runs the input data through each of these steps sequentially, and shows you t
             ui.checkbox(&mut self.show_input, "Show Input Geometry");
             ui.checkbox(&mut self.show_cleaned, "Show Cleaned Edges");
             ui.checkbox(&mut self.show_clipped, "Show Clipped Result");
+            ui.checkbox(&mut self.show_raw_offset, "Show Raw Offset Edges");
+            ui.checkbox(&mut self.show_cleaned_offset, "Show Cleaned Offset Edges");
+            ui.checkbox(&mut self.show_clipped_offset, "Show Clipped Offset Edges");
             ui.checkbox(&mut self.show_triangulation, "Show Triangulation");
 
             ui.separator();
@@ -518,6 +630,8 @@ It runs the input data through each of these steps sequentially, and shows you t
                     &self.input_edges,
                     self.winding_rule,
                     self.epsilon,
+                    self.offset_amount,
+                    &self.cap_style.to_cap_style_f32(),
                 );
             }
 
@@ -545,8 +659,57 @@ It runs the input data through each of these steps sequentially, and shows you t
                     &self.input_edges,
                     self.winding_rule,
                     self.epsilon,
+                    self.offset_amount,
+                    &self.cap_style.to_cap_style_f32(),
                 );
             }
+
+            ui.separator();
+            ui.heading("Offset Settings");
+
+            let offset_response = ui.add(
+                egui::Slider::new(&mut self.offset_amount, -1.0..=1.0)
+                    .text("Offset Amount")
+                    .step_by(0.05)
+            );
+
+            if offset_response.changed() {
+                self.processing_results = ProcessingResults::process(
+                    &self.input_vertices,
+                    &self.input_edges,
+                    self.winding_rule,
+                    self.epsilon,
+                    self.offset_amount,
+                    &self.cap_style.to_cap_style_f32(),
+                );
+            }
+
+            let current_cap = self.cap_style;
+            let mut cap_changed = false;
+            egui::ComboBox::from_id_salt("cap_style")
+                .selected_text(current_cap.as_str())
+                .show_ui(ui, |ui| {
+                    for style in CapStyle::all() {
+                        if ui
+                            .selectable_value(&mut self.cap_style, style, style.as_str())
+                            .clicked()
+                        {
+                            cap_changed = true;
+                        }
+                    }
+                });
+
+            if cap_changed {
+                self.processing_results = ProcessingResults::process(
+                    &self.input_vertices,
+                    &self.input_edges,
+                    self.winding_rule,
+                    self.epsilon,
+                    self.offset_amount,
+                    &self.cap_style.to_cap_style_f32(),
+                );
+            }
+
             ui.separator();
             if ui.button("Edit Geometry as JSON...").clicked() {
                 self.sync_text_from_data();
@@ -569,6 +732,21 @@ It runs the input data through each of these steps sequentially, and shows you t
                 let mut color = colors.clipped.to_array();
                 ui.color_edit_button_srgba_unmultiplied(&mut color);
                 ui.label("Clipped");
+            });
+            ui.horizontal(|ui| {
+                let mut color = colors.raw_offset.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
+                ui.label("Raw Offset");
+            });
+            ui.horizontal(|ui| {
+                let mut color = colors.cleaned_offset.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
+                ui.label("Cleaned Offset");
+            });
+            ui.horizontal(|ui| {
+                let mut color = colors.clipped_offset.to_array();
+                ui.color_edit_button_srgba_unmultiplied(&mut color);
+                ui.label("Clipped Offset");
             });
             ui.horizontal(|ui| {
                 let mut color = colors.triangulation.to_array();
@@ -646,6 +824,8 @@ It runs the input data through each of these steps sequentially, and shows you t
                                     &self.input_edges,
                                     self.winding_rule,
                                     self.epsilon,
+                                    self.offset_amount,
+                                    &self.cap_style.to_cap_style_f32(),
                                 );
                             }
                         } else if pointer_released {
@@ -671,7 +851,14 @@ It runs the input data through each of these steps sequentially, and shows you t
                         // Draw triangle edges as arrows
                         let triangle_arrows = self.processing_results.triangles_to_arrows();
                         for (origin, tip) in triangle_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.triangulation, 2.0, 0.08);
+                            Self::draw_arrow(
+                                plot_ui,
+                                origin,
+                                tip,
+                                colors.triangulation,
+                                2.0,
+                                ARROW_SIZE,
+                            );
                         }
 
                         // Draw triangle vertices
@@ -691,7 +878,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.input_edges);
                         for (origin, tip) in input_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.input, 2.5, 0.08);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.input, 2.5, ARROW_SIZE);
                         }
 
                         // Draw input vertices (with highlighting for draggable/dragged)
@@ -723,7 +910,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.cleaned_edges);
                         for (origin, tip) in cleaned_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned, 2.0, 0.08);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned, 2.0, ARROW_SIZE);
                         }
 
                         // Draw cleaned vertices
@@ -745,7 +932,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.clipped_edges);
                         for (origin, tip) in clipped_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped, 2.5, 0.08);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped, 2.5, ARROW_SIZE);
                         }
 
                         // Draw clipped vertices
@@ -756,6 +943,93 @@ It runs the input data through each of these steps sequentially, and shows you t
                             plot_ui.points(
                                 Points::new("", clipped_verts)
                                     .color(colors.clipped)
+                                    .radius(4.0),
+                            );
+                        }
+                    }
+
+                    // Layer 5: Raw offset edges (magenta)
+                    if self.show_raw_offset {
+                        let raw_offset_arrows = self
+                            .processing_results
+                            .edges_to_arrows(&self.processing_results.raw_offset_edges);
+                        for (origin, tip) in raw_offset_arrows {
+                            Self::draw_arrow(
+                                plot_ui,
+                                origin,
+                                tip,
+                                colors.raw_offset,
+                                2.0,
+                                ARROW_SIZE,
+                            );
+                        }
+
+                        // Draw raw offset vertices
+                        let raw_offset_verts = self
+                            .processing_results
+                            .edges_to_vertices(&self.processing_results.raw_offset_edges);
+                        if !raw_offset_verts.is_empty() {
+                            plot_ui.points(
+                                Points::new("", raw_offset_verts)
+                                    .color(colors.raw_offset)
+                                    .radius(3.5),
+                            );
+                        }
+                    }
+
+                    // Layer 6: Cleaned offset edges (cyan)
+                    if self.show_cleaned_offset {
+                        let cleaned_offset_arrows = self
+                            .processing_results
+                            .edges_to_arrows(&self.processing_results.cleaned_offset_edges);
+                        for (origin, tip) in cleaned_offset_arrows {
+                            Self::draw_arrow(
+                                plot_ui,
+                                origin,
+                                tip,
+                                colors.cleaned_offset,
+                                2.0,
+                                ARROW_SIZE,
+                            );
+                        }
+
+                        // Draw cleaned offset vertices
+                        let cleaned_offset_verts = self
+                            .processing_results
+                            .edges_to_vertices(&self.processing_results.cleaned_offset_edges);
+                        if !cleaned_offset_verts.is_empty() {
+                            plot_ui.points(
+                                Points::new("", cleaned_offset_verts)
+                                    .color(colors.cleaned_offset)
+                                    .radius(3.5),
+                            );
+                        }
+                    }
+
+                    // Layer 7: Clipped offset edges (red)
+                    if self.show_clipped_offset {
+                        let clipped_offset_arrows = self
+                            .processing_results
+                            .edges_to_arrows(&self.processing_results.clipped_offset_edges);
+                        for (origin, tip) in clipped_offset_arrows {
+                            Self::draw_arrow(
+                                plot_ui,
+                                origin,
+                                tip,
+                                colors.clipped_offset,
+                                2.5,
+                                ARROW_SIZE,
+                            );
+                        }
+
+                        // Draw clipped offset vertices
+                        let clipped_offset_verts = self
+                            .processing_results
+                            .edges_to_vertices(&self.processing_results.clipped_offset_edges);
+                        if !clipped_offset_verts.is_empty() {
+                            plot_ui.points(
+                                Points::new("", clipped_offset_verts)
+                                    .color(colors.clipped_offset)
                                     .radius(4.0),
                             );
                         }
