@@ -27,6 +27,7 @@ impl From<ClippingError> for OffsetError {
 pub fn offset_raw<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
+    offset_amount: K::OffsetAmount,
     cap_style: &K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     // Go through all the edges.
@@ -116,7 +117,7 @@ pub fn offset_raw<K: Kernel>(
 
     // Process lone edges, offsetting each appropriately.
     for edge in lone_edges.into_iter() {
-        result_edges.push(kernel.offset_edge(edge));
+        result_edges.push(kernel.offset_edge(edge, offset_amount));
     }
 
     // Process edges with endpoints, offsetting each appropriately,
@@ -126,7 +127,7 @@ pub fn offset_raw<K: Kernel>(
         EdgeSide::Tail => Some(event.edge),
         EdgeSide::Head => None,
     }) {
-        let offset_edge = kernel.offset_edge(edge);
+        let offset_edge = kernel.offset_edge(edge, offset_amount);
         original_to_offset.insert(edge, offset_edge);
         result_edges.push(offset_edge);
     }
@@ -138,12 +139,13 @@ pub fn offset_raw<K: Kernel>(
 
         let (_, original_vertex) = kernel.vertices_for_edge(original_incoming_edge).unwrap();
 
-        result_edges.push(kernel.cap_edges(
+        kernel.cap_corner(
             offset_incoming_edge,
             offset_outgoing_edge,
             original_vertex,
             cap_style,
-        ));
+            |e| result_edges.push(e),
+        );
     }
 
     Ok(result_edges)
@@ -152,9 +154,10 @@ pub fn offset_raw<K: Kernel>(
 pub fn offset<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
+    offset_amount: K::OffsetAmount,
     cap_style: &K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
-    let edges = offset_raw(kernel, edges, cap_style)?;
+    let edges = offset_raw(kernel, edges, offset_amount, cap_style)?;
     let edges = clean(kernel, edges.into_iter());
     let edges = clip(kernel, edges.into_iter(), |w| w > 0)?;
     Ok(edges)

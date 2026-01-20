@@ -105,13 +105,14 @@ pub trait Kernel: Sized {
 
     fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge;
 
-    fn cap_edges(
+    fn cap_corner(
         &mut self,
         incoming_edge: Self::Edge,
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
         cap_style: &Self::CapStyle,
-    ) -> Self::Edge;
+        emit_edge: impl FnMut(Self::Edge),
+    );
 }
 
 pub trait Edge: Copy + Ord + Debug {

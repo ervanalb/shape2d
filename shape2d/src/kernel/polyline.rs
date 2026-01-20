@@ -308,17 +308,104 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     }
 
     fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge {
-        todo!();
+        let a_pt = self.v(edge.0);
+        let b_pt = self.v(edge.1);
+
+        let offset_x = a_pt[1] - a_pt[1]; // -Y
+        let offset_y = b_pt[0] - a_pt[0]; // X
+        let norm_factor = offset / offset_x.hypot(offset_y);
+        let offset_x = offset_x * norm_factor;
+        let offset_y = offset_y * norm_factor;
+
+        let new_a = self.push_vertex([a_pt[0] + offset_x, a_pt[1] + offset_y]);
+        let new_b = self.push_vertex([b_pt[0] + offset_x, b_pt[1] + offset_y]);
+
+        (new_a, new_b)
     }
 
-    fn cap_edges(
+    fn cap_corner(
         &mut self,
         incoming_edge: Self::Edge,
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
         cap_style: &Self::CapStyle,
-    ) -> Self::Edge {
-        todo!();
+        mut emit_edge: impl FnMut(Self::Edge),
+    ) {
+        let ix_a = incoming_edge.1;
+        let ix_b = outgoing_edge.0;
+        let pt_a = self.v(ix_a);
+        let pt_b = self.v(ix_b);
+        let original_pt = self.v(original_vertex);
+
+        // For a concave corner, draw lines to the original vertex
+        // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
+        if matches!(sin_cmp_f32(original_pt, pt_a, pt_b), Ordering::Less) {
+            emit_edge((ix_a, original_vertex));
+            emit_edge((original_vertex, ix_b));
+        }
+
+        match cap_style {
+            CapStyleF32::Arc { tolerance } => {
+                // Calculate vectors from center to both points
+                let dx_a = pt_a[0] - original_pt[0];
+                let dy_a = pt_a[1] - original_pt[1];
+                let dx_b = pt_b[0] - original_pt[0];
+                let dy_b = pt_b[1] - original_pt[1];
+
+                // Calculate radius from center to pt_a
+                let radius = (dx_a * dx_a + dy_a * dy_a).sqrt();
+
+                // Calculate the angle between the two vectors
+                let cross = dx_a * dy_b - dy_a * dx_b; // 2D cross product (z-component)
+                let dot = dx_a * dx_b + dy_a * dy_b; // dot product
+                let mut delta_angle = cross.atan2(dot);
+                if delta_angle < 0. {
+                    delta_angle += std::f32::consts::TAU;
+                }
+
+                // Calculate maximum angle per segment based on tolerance
+                // The sagitta (deviation) of a chord from an arc is: s = r * (1 - cos(θ/2))
+                // Solving for θ when s = tolerance: θ = 2 * arccos(1 - tolerance/r)
+                let cos_arg = (1.0 - tolerance.max(self.epsilon.value()) / radius).clamp(-1.0, 1.0);
+                let max_angle_per_segment = 2.0 * cos_arg.acos();
+                let num_segments = (delta_angle / max_angle_per_segment).ceil().max(1.) as u32;
+
+                // Interpolate the arc
+                let mut prev_vertex = ix_a;
+                let factor = delta_angle / num_segments as f32;
+                for i in 0..num_segments - 1 {
+                    let theta = i as f32 * factor;
+                    let c = theta.cos();
+                    let s = theta.sin();
+                    // Rotate [dx_a, dy_a] by theta
+                    let dx = c * dx_a + s * dy_a;
+                    let dy = -s * dx_a + c * dy_a;
+                    let v = self.push_vertex([original_pt[0] + dx, original_pt[1] + dy]);
+                    emit_edge((prev_vertex, v));
+                    prev_vertex = v;
+                }
+                emit_edge((prev_vertex, ix_b));
+            }
+            CapStyleF32::Bevel => {
+                emit_edge((ix_a, ix_b));
+            }
+            CapStyleF32::Miter { limit } => {
+                let pt_before_a = self.v(incoming_edge.0);
+                let pt_after_b = self.v(outgoing_edge.1);
+                let miter_pt = intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b);
+                let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
+                let dist_sq = d[0] * d[0] + d[1] * d[1];
+                if 4. * dist_sq > limit * limit {
+                    // If 2 * miter distance > miter_limit,
+                    // convert to bevel
+                    emit_edge((ix_a, ix_b));
+                } else {
+                    let miter_vertex = self.push_vertex(miter_pt);
+                    emit_edge((ix_a, miter_vertex));
+                    emit_edge((miter_vertex, ix_b));
+                }
+            }
+        }
     }
 }
 
@@ -414,6 +501,8 @@ fn intersect_segments_f32(
     b_end: [f32; 2],
     epsilon: f32,
 ) -> Option<[f32; 2]> {
+    // TODO rewrite with Plucker coordinates
+
     let da_x = a_end[0] - a_start[0];
     let da_y = a_end[1] - a_start[1];
     let db_x = b_end[0] - b_start[0];
@@ -538,6 +627,35 @@ fn select_vertex<T>(event_type: EdgeSide, edge: (T, T)) -> T {
         EdgeSide::Tail => edge.0,
         EdgeSide::Head => edge.1,
     }
+}
+
+#[inline]
+fn intersect_lines_f32(a1: [f32; 2], a2: [f32; 2], b1: [f32; 2], b2: [f32; 2]) -> [f32; 2] {
+    // Promote to homogeneous coordinates
+    let a1_h = [a1[0], a1[1], 1.0];
+    let a2_h = [a2[0], a2[1], 1.0];
+    let b1_h = [b1[0], b1[1], 1.0];
+    let b2_h = [b2[0], b2[1], 1.0];
+
+    // Lines using Plucker coordinates
+    let a = cross_f32(a1_h, a2_h);
+    let b = cross_f32(b1_h, b2_h);
+
+    // Calculate intersection
+    let intersection_h = cross_f32(a, b);
+
+    // Divide out perspective coordinate
+    let z_inv = 1. / intersection_h[2];
+    [intersection_h[0] * z_inv, intersection_h[1] * z_inv]
+}
+
+#[inline]
+fn cross_f32(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
 }
 
 #[cfg(test)]
