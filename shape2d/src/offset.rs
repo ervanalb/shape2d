@@ -163,3 +163,105 @@ pub fn offset<K: Kernel>(
     let edges = clip(kernel, edges.into_iter(), |w| w > 0)?;
     Ok(edges)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::kernel::polyline::{CapStyleF32, F32 as Kernel};
+
+    #[test]
+    fn test_offset_square_erodes_to_nothing() {
+        // Create a 2x2 square centered at origin
+        let mut kernel = Kernel::new(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        // Erode by -2.0 (larger than the square's half-width)
+        // This should completely erode the square
+        let cap_style = CapStyleF32::Bevel;
+        let result = offset(&mut kernel, edges.into_iter(), -2.0, &cap_style).unwrap();
+
+        // The result should be empty (square fully eroded)
+        assert!(result.is_empty(), "Square should be completely eroded");
+    }
+
+    #[test]
+    fn test_offset_square_erodes_partially() {
+        // Create a 4x4 square centered at origin
+        let mut kernel = Kernel::new(vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        // Erode by -0.5
+        let cap_style = CapStyleF32::Arc { tolerance: 0.01 };
+        let result = offset(&mut kernel, edges.into_iter(), -0.5, &cap_style).unwrap();
+
+        // The result should be a square
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_offset_square_expands() {
+        // Create a 2x2 square centered at origin
+        let mut kernel = Kernel::new(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        // Expand by +0.5
+        let cap_style = CapStyleF32::Bevel;
+        let result = offset(&mut kernel, edges.into_iter(), 0.5, &cap_style).unwrap();
+
+        // Should have 4 edges + 4 caps
+        assert_eq!(result.len(), 8,);
+    }
+
+    #[test]
+    fn test_offset_triangle_expands() {
+        // Create a triangle
+        let mut kernel = Kernel::new(vec![[0.0, 2.0], [-2.0, -2.0], [2.0, -2.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 0)];
+
+        // Expand by +0.5
+        let cap_style = CapStyleF32::Bevel;
+        let result = offset(&mut kernel, edges.into_iter(), 0.5, &cap_style).unwrap();
+
+        // The result should have 3 edges + 3 caps
+        assert!(!result.is_empty(), "Expanded triangle should have edges");
+        assert_eq!(result.len(), 6);
+    }
+
+    #[test]
+    fn test_offset_zero_amount() {
+        // Create a simple square
+        let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        // Offset by 0 should return similar topology
+        let cap_style = CapStyleF32::Bevel;
+        let result = offset(&mut kernel, edges.into_iter(), 0.0, &cap_style).unwrap();
+
+        // Should have edges (though vertices may have changed)
+        assert_eq!(result.len(), 4);
+    }
+
+    #[test]
+    fn test_offset_restores_approximately() {
+        // Create a large square
+        let mut kernel = Kernel::new(vec![[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
+
+        let cap_style = CapStyleF32::Arc { tolerance: 0.01 };
+
+        // Expand by +1.0
+        let expanded = offset(&mut kernel, edges.into_iter(), 1.0, &cap_style).unwrap();
+
+        // Erode back by -1.1
+        let restored = offset(&mut kernel, expanded.into_iter(), -1.1, &cap_style).unwrap();
+
+        // The result should have 4 edges (though not identical to original due to rounding)
+        assert_eq!(restored.len(), 4);
+    }
+}

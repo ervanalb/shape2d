@@ -1029,4 +1029,233 @@ mod tests {
         // Collinear points
         assert_eq!(sin_cmp_f32(origin, diagonal, diagonal2), Ordering::Equal);
     }
+
+    #[test]
+    fn test_quadrant_positive_x() {
+        assert_eq!(quadrant_f32([1.0, 0.0]), 0);
+        assert_eq!(quadrant_f32([5.0, 0.0]), 0);
+    }
+
+    #[test]
+    fn test_quadrant_positive_y_negative_x() {
+        assert_eq!(quadrant_f32([-1.0, 1.0]), 1);
+        assert_eq!(quadrant_f32([-5.0, 5.0]), 1);
+        assert_eq!(quadrant_f32([0.0, 1.0]), 1);
+    }
+
+    #[test]
+    fn test_quadrant_negative_x_negative_y() {
+        assert_eq!(quadrant_f32([-1.0, -1.0]), 2);
+        assert_eq!(quadrant_f32([-5.0, -5.0]), 2);
+        assert_eq!(quadrant_f32([-1.0, 0.0]), 2);
+    }
+
+    #[test]
+    fn test_quadrant_negative_y_positive_x() {
+        assert_eq!(quadrant_f32([1.0, -1.0]), 3);
+        assert_eq!(quadrant_f32([5.0, -5.0]), 3);
+    }
+
+    #[test]
+    fn test_quadrant_origin() {
+        assert_eq!(quadrant_f32([0.0, 0.0]), 0);
+    }
+
+    #[test]
+    fn test_quadrant_positive_x_axis() {
+        assert_eq!(quadrant_f32([1.0, 0.0]), 0);
+    }
+
+    #[test]
+    fn test_quadrant_negative_x_axis() {
+        assert_eq!(quadrant_f32([-1.0, 0.0]), 2);
+    }
+
+    #[test]
+    fn test_quadrant_positive_y_axis() {
+        assert_eq!(quadrant_f32([0.0, 1.0]), 1);
+    }
+
+    #[test]
+    fn test_quadrant_negative_y_axis() {
+        assert_eq!(quadrant_f32([0.0, -1.0]), 3);
+    }
+
+    #[test]
+    fn test_intersect_lines_perpendicular() {
+        let a1 = [0.0, 0.0];
+        let a2 = [1.0, 0.0]; // Horizontal line through origin
+        let b1 = [0.5, -1.0];
+        let b2 = [0.5, 1.0]; // Vertical line through x=0.5
+
+        let result = intersect_lines_f32(a1, a2, b1, b2);
+        assert!(points_coincident_f32(
+            result,
+            [0.5, 0.0],
+            DEFAULT_EPSILON_F32
+        ));
+    }
+
+    #[test]
+    fn test_intersect_lines_diagonal() {
+        let a1 = [0.0, 0.0];
+        let a2 = [1.0, 1.0]; // Line y = x
+        let b1 = [0.0, 1.0];
+        let b2 = [1.0, 0.0]; // Line y = -x + 1
+
+        let result = intersect_lines_f32(a1, a2, b1, b2);
+        assert!(points_coincident_f32(
+            result,
+            [0.5, 0.5],
+            DEFAULT_EPSILON_F32
+        ));
+    }
+
+    #[test]
+    fn test_intersect_lines_at_origin() {
+        let a1 = [-1.0, 0.0];
+        let a2 = [1.0, 0.0]; // Horizontal line through origin
+        let b1 = [0.0, -1.0];
+        let b2 = [0.0, 1.0]; // Vertical line through origin
+
+        let result = intersect_lines_f32(a1, a2, b1, b2);
+        assert!(points_coincident_f32(
+            result,
+            [0.0, 0.0],
+            DEFAULT_EPSILON_F32
+        ));
+    }
+
+    #[test]
+    fn test_intersect_lines_various_angles() {
+        // Line 1: from (0,0) to (2,1) → y = x/2
+        let a1 = [0.0, 0.0];
+        let a2 = [2.0, 1.0];
+        // Line 2: from (0,1) to (2,0) → y = 1 - x/2
+        let b1 = [0.0, 1.0];
+        let b2 = [2.0, 0.0];
+
+        let result = intersect_lines_f32(a1, a2, b1, b2);
+        // These lines should intersect at (1, 0.5)
+        assert!(points_coincident_f32(
+            result,
+            [1.0, 0.5],
+            DEFAULT_EPSILON_F32
+        ));
+    }
+
+    #[test]
+    fn test_intersect_lines_negative_coords() {
+        let a1 = [-2.0, -2.0];
+        let a2 = [2.0, 2.0]; // Line through origin, slope 1
+        let b1 = [-2.0, 2.0];
+        let b2 = [2.0, -2.0]; // Line through origin, slope -1
+
+        let result = intersect_lines_f32(a1, a2, b1, b2);
+        assert!(points_coincident_f32(
+            result,
+            [0.0, 0.0],
+            DEFAULT_EPSILON_F32
+        ));
+    }
+
+    #[test]
+    fn test_dot_orthogonal_vectors() {
+        let a = [1.0, 0.0];
+        let b = [0.0, 1.0];
+        assert_eq!(dot_f32(a, b), 0.0);
+    }
+
+    #[test]
+    fn test_dot_parallel_vectors() {
+        let a = [3.0, 4.0];
+        let b = [6.0, 8.0]; // 2 * a
+        assert_eq!(dot_f32(a, b), 50.0);
+    }
+
+    #[test]
+    fn test_dot_anti_parallel_vectors() {
+        let a = [1.0, 0.0];
+        let b = [-1.0, 0.0];
+        assert_eq!(dot_f32(a, b), -1.0);
+    }
+
+    #[test]
+    fn test_dot_same_vector() {
+        let a = [3.0, 4.0];
+        // dot(a, a) = |a|^2 = 9 + 16 = 25
+        assert_eq!(dot_f32(a, a), 25.);
+    }
+
+    #[test]
+    fn test_dot_zero_vector() {
+        let a = [5.0, 7.0];
+        let b = [0.0, 0.0];
+        assert_eq!(dot_f32(a, b), 0.0);
+    }
+
+    #[test]
+    fn test_dot_negative_coords() {
+        let a = [-2.0, -3.0];
+        let b = [4.0, 5.0];
+        // -2*4 + -3*5 = -8 - 15 = -23
+        assert_eq!(dot_f32(a, b), -23.);
+    }
+
+    #[test]
+    fn test_cross_standard_basis_x_y() {
+        let x = [1.0, 0.0, 0.0];
+        let y = [0.0, 1.0, 0.0];
+        let result = cross_f32(x, y);
+        assert_eq!(result, [0., 0., 1.]);
+    }
+
+    #[test]
+    fn test_cross_standard_basis_y_z() {
+        let y = [0.0, 1.0, 0.0];
+        let z = [0.0, 0.0, 1.0];
+        let result = cross_f32(y, z);
+        assert_eq!(result, [1., 0., 0.]);
+    }
+
+    #[test]
+    fn test_cross_parallel_vectors() {
+        let a = [2.0, 4.0, 6.0];
+        let b = [4.0, 8.0, 12.0]; // 2 * a
+        let result = cross_f32(a, b);
+        assert_eq!(result, [0., 0., 0.]);
+    }
+
+    #[test]
+    fn test_cross_anti_commutative() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [4.0, 5.0, 6.0];
+        let ab = cross_f32(a, b);
+        let ba = cross_f32(b, a);
+        assert_eq!(ab, [-ba[0], -ba[1], -ba[2]]);
+    }
+
+    #[test]
+    fn test_cross_arbitrary_vectors() {
+        let a = [1.0, 2.0, 3.0];
+        let b = [4.0, 5.0, 6.0];
+        let result = cross_f32(a, b);
+        assert_eq!(result, [-3., 6., -3.])
+    }
+
+    #[test]
+    fn test_cross_zero_vector() {
+        let a = [1.0, 2.0, 3.0];
+        let zero = [0.0, 0.0, 0.0];
+        let result = cross_f32(a, zero);
+        assert_eq!(result, [0., 0., 0.])
+    }
+
+    #[test]
+    fn test_cross_negative_coords() {
+        let a = [-1.0, -2.0, -3.0];
+        let b = [1.0, 2.0, 3.0];
+        let result = cross_f32(a, b);
+        assert_eq!(result, [0., 0., 0.])
+    }
 }
