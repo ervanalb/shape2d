@@ -210,7 +210,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
 
     /// Run the cleaning algorithm
     fn clean(&mut self) -> Result<(), ()> {
-        let mut temp_count = 0;
+        //let mut temp_count = 0;
         while let Some(&dirty_edge) = self.dirty_set.first() {
             // Get edge info
             let dirty_info = &self.edge_info.get(&dirty_edge).unwrap();
@@ -334,14 +334,14 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
             }
 
             // Handle the action if one was found
-            if let Some(action) = action.as_ref() {
-                temp_count += 1;
-                if temp_count > 200 {
-                    return Err(());
-                }
-                println!("edges = {:?}", self.extract_edges());
-                dbg!(action);
-            }
+            //if let Some(action) = action.as_ref() {
+            //    temp_count += 1;
+            //    if temp_count > 200 {
+            //        return Err(());
+            //    }
+            //    println!("edges = {:?}", self.extract_edges());
+            //    dbg!(action);
+            //}
             match action {
                 Some(Action::CancelEdges { e1, e2 }) => {
                     // Remove both edges
@@ -469,6 +469,7 @@ pub fn partial_clean<K: Kernel>(
     Ok(spatial_index.extract_edges())
 }
 
+// XXX remove falliable_clean and partial_clean returning a Result
 // Full clean: clean all edges (assumes all dirty)
 pub fn falliable_clean<K: Kernel>(
     kernel: &mut K,
@@ -478,10 +479,7 @@ pub fn falliable_clean<K: Kernel>(
 }
 
 // Full clean: clean all edges (assumes all dirty)
-pub fn clean<K: Kernel>(
-    kernel: &mut K,
-    edges: impl Iterator<Item = K::Edge>,
-) -> Vec<K::Edge> {
+pub fn clean<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) -> Vec<K::Edge> {
     partial_clean(kernel, edges.map(|edge| (edge, DirtyFlag::Dirty))).unwrap()
 }
 
@@ -593,7 +591,6 @@ mod tests {
         // Horizontal and vertical intersect at [0.5, 0.5]
         // Diagonal intersects both at [0.5, 0.5]
         // So all three meet at one point, creating 6 edges
-        dbg!(&result);
         assert_eq!(result.len(), 6);
     }
 

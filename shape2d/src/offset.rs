@@ -64,8 +64,6 @@ pub fn offset_raw<K: Kernel>(
             == b.event_type
                 .select(kernel.vertices_for_edge(b.edge).unwrap())
     }) {
-        println!("XXX");
-        dbg!(vertex_events);
         match vertex_events[0].event_type {
             EdgeSide::Tail => {
                 // Edges are sorted CCW around the vertex.
@@ -76,8 +74,6 @@ pub fn offset_raw<K: Kernel>(
                     return Err(OffsetError::Topology);
                 }
                 for [outgoing, incoming] in pairs {
-                    dbg!(outgoing);
-                    dbg!(incoming);
                     if !matches!(
                         (outgoing.event_type, incoming.event_type),
                         (EdgeSide::Tail, EdgeSide::Head)

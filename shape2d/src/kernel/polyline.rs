@@ -130,18 +130,6 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             .max(fp_mag_pt_f32(pt_b0))
             .max(fp_mag_pt_f32(pt_b1));
 
-        // XXX
-        if b.0 == 224 && b.1 == 223 && a.0 == 118 && a.1 == 230 {
-            dbg!(intersect_segments_f32(
-                dbg!(self.v(a.0)),
-                dbg!(self.v(a.1)),
-                dbg!(self.v(b.0)),
-                dbg!(self.v(b.1)),
-                self.epsilon.value(fp_mag),
-            ))?;
-            panic!();
-        }
-
         Some(intersect_segments_f32(
             self.v(a.0),
             self.v(a.1),
@@ -338,7 +326,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 quadrant_f32(a).cmp(&quadrant_f32(b)).then_with(||
                     // Points are within 90 degrees of each other,
                     // so we can use sin_cmp to compare them
-                        dbg!(sin_cmp_f32(dbg!(shared_pt), dbg!(a_other_pt), dbg!(b_other_pt))))
+                    sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
             })
     }
 
@@ -941,11 +929,7 @@ mod tests {
         let a = [0.0_f32, 0.0];
         let b = [1.0, 1.0];
         let merged = merge_points_f32(a, b);
-        assert!(points_coincident_f32(
-            merged,
-            [0.5, 0.5],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(merged, [0.5, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -953,11 +937,7 @@ mod tests {
         let a = [0.5_f32, 0.5];
         let b = [0.5, 0.5];
         let merged = merge_points_f32(a, b);
-        assert!(points_coincident_f32(
-            merged,
-            [0.5, 0.5],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(merged, [0.5, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -965,11 +945,7 @@ mod tests {
         let a = [-1.0_f32, -1.0];
         let b = [1.0, 1.0];
         let merged = merge_points_f32(a, b);
-        assert!(points_coincident_f32(
-            merged,
-            [0.0, 0.0],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(merged, [0.0, 0.0], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1140,11 +1116,7 @@ mod tests {
         let b2 = [0.5, 1.0]; // Vertical line through x=0.5
 
         let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
-        assert!(points_coincident_f32(
-            result,
-            [0.5, 0.0],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(result, [0.5, 0.0], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1155,11 +1127,7 @@ mod tests {
         let b2 = [1.0, 0.0]; // Line y = -x + 1
 
         let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
-        assert!(points_coincident_f32(
-            result,
-            [0.5, 0.5],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(result, [0.5, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1170,11 +1138,7 @@ mod tests {
         let b2 = [0.0, 1.0]; // Vertical line through origin
 
         let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
-        assert!(points_coincident_f32(
-            result,
-            [0.0, 0.0],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1188,11 +1152,7 @@ mod tests {
 
         let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         // These lines should intersect at (1, 0.5)
-        assert!(points_coincident_f32(
-            result,
-            [1.0, 0.5],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(result, [1.0, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1203,10 +1163,6 @@ mod tests {
         let b2 = [2.0, -2.0]; // Line through origin, slope -1
 
         let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
-        assert!(points_coincident_f32(
-            result,
-            [0.0, 0.0],
-            EPSILON_MIN_F32
-        ));
+        assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
     }
 }
