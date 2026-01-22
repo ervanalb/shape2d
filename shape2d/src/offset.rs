@@ -64,6 +64,8 @@ pub fn offset_raw<K: Kernel>(
             == b.event_type
                 .select(kernel.vertices_for_edge(b.edge).unwrap())
     }) {
+        println!("XXX");
+        dbg!(vertex_events);
         match vertex_events[0].event_type {
             EdgeSide::Tail => {
                 // Edges are sorted CCW around the vertex.
@@ -74,10 +76,13 @@ pub fn offset_raw<K: Kernel>(
                     return Err(OffsetError::Topology);
                 }
                 for [outgoing, incoming] in pairs {
+                    dbg!(outgoing);
+                    dbg!(incoming);
                     if !matches!(
                         (outgoing.event_type, incoming.event_type),
                         (EdgeSide::Tail, EdgeSide::Head)
                     ) {
+                        panic!();
                         return Err(OffsetError::Topology);
                     }
                     edge_junctions.push((incoming.edge, outgoing.edge));
@@ -263,5 +268,16 @@ mod tests {
 
         // The result should have 4 edges (though not identical to original due to rounding)
         assert_eq!(restored.len(), 4);
+    }
+
+    #[test]
+    fn test_conjoined_triangles() {
+        // Create a large square
+        let mut kernel = Kernel::new(vec![[0., 0.], [-1., -1.], [-1., -2.], [1., 2.], [-1., 1.]]);
+
+        let edges = vec![(0, 1), (1, 2), (2, 0), (0, 3), (3, 4), (4, 0)];
+
+        // offset_raw should not return a topology error
+        offset_raw(&mut kernel, edges.into_iter(), 0.1, &CapStyleF32::Bevel).unwrap();
     }
 }

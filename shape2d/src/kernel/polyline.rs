@@ -110,11 +110,23 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             return None;
         }
 
+        if b.0 == 224 && b.1 == 223 && a.0 == 118 && a.1 == 230 {
+            dbg!(intersect_segments_f32(
+                dbg!(self.v(a.0)),
+                dbg!(self.v(a.1)),
+                dbg!(self.v(b.0)),
+                dbg!(self.v(b.1)),
+                self.epsilon.value(),
+            ))?;
+            panic!();
+        }
+
         Some(intersect_segments_f32(
             self.v(a.0),
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
+            self.epsilon.value(),
         )?)
     }
 
@@ -302,7 +314,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 quadrant_f32(a).cmp(&quadrant_f32(b)).then_with(||
                     // Points are within 90 degrees of each other,
                     // so we can use sin_cmp to compare them
-                        sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
+                        dbg!(sin_cmp_f32(dbg!(shared_pt), dbg!(a_other_pt), dbg!(b_other_pt))))
             })
     }
 
@@ -394,17 +406,27 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             CapStyleF32::Miter { limit } => {
                 let pt_before_a = self.v(incoming_edge.0);
                 let pt_after_b = self.v(outgoing_edge.1);
-                let miter_pt = intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b);
-                let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
-                let dist_sq = d[0] * d[0] + d[1] * d[1];
-                if 4. * dist_sq > limit * limit {
-                    // If 2 * miter distance > miter_limit,
-                    // convert to bevel
-                    emit_edge((ix_a, ix_b));
-                } else {
+                let miter_pt =
+                    intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b, self.epsilon.value())
+                        .and_then(|miter_pt| {
+                            let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
+                            let dist_sq = d[0] * d[0] + d[1] * d[1];
+                            if 4. * dist_sq < limit * limit {
+                                // If 2 * miter distance < miter_limit,
+                                // emit miter
+                                Some(miter_pt)
+                            } else {
+                                None
+                            }
+                        });
+                if let Some(miter_pt) = miter_pt {
+                    // Emit miter
                     let miter_vertex = self.push_vertex(miter_pt);
                     emit_edge((ix_a, miter_vertex));
                     emit_edge((miter_vertex, ix_b));
+                } else {
+                    // Emit bevel
+                    emit_edge((ix_a, ix_b));
                 }
             }
         }
@@ -501,34 +523,8 @@ fn intersect_segments_f32(
     a_end: [f32; 2],
     b_start: [f32; 2],
     b_end: [f32; 2],
+    epsilon: f32,
 ) -> Option<[f32; 2]> {
-    // TODO rewrite with Plucker coordinates
-
-    let intersection = intersect_lines_f32(a_start, a_end, b_start, b_end);
-
-    let a_vec = [a_end[0] - a_start[0], a_end[1] - a_start[1]];
-    let a_split = [intersection[0] - a_start[0], intersection[1] - a_start[1]];
-    let a_split_dot_a = dot_f32(a_split, a_vec);
-    let a_squared = dot_f32(a_vec, a_vec);
-
-    let b_vec = [b_end[0] - b_start[0], b_end[1] - b_start[1]];
-    let b_split = [intersection[0] - b_start[0], intersection[1] - b_start[1]];
-    let b_split_dot_b = dot_f32(b_split, b_vec);
-    let b_squared = dot_f32(b_vec, b_vec);
-
-    if a_split_dot_a > 0.
-        && a_split_dot_a < a_squared
-        && b_split_dot_b > 0.
-        && b_split_dot_b < b_squared
-    {
-        Some(intersection)
-    } else {
-        None
-    }
-
-    ////////
-    /*
-
     let da_x = a_end[0] - a_start[0];
     let da_y = a_end[1] - a_start[1];
     let db_x = b_end[0] - b_start[0];
@@ -566,7 +562,6 @@ fn intersect_segments_f32(
     } else {
         None
     }
-    */
 }
 
 #[inline]
@@ -657,37 +652,40 @@ fn select_vertex<T>(event_type: EdgeSide, edge: (T, T)) -> T {
 }
 
 #[inline]
-fn intersect_lines_f32(a1: [f32; 2], a2: [f32; 2], b1: [f32; 2], b2: [f32; 2]) -> [f32; 2] {
-    // Promote to homogeneous coordinates
-    let a1_h = [a1[0], a1[1], 1.0];
-    let a2_h = [a2[0], a2[1], 1.0];
-    let b1_h = [b1[0], b1[1], 1.0];
-    let b2_h = [b2[0], b2[1], 1.0];
+fn intersect_lines_f32(
+    a_start: [f32; 2],
+    a_end: [f32; 2],
+    b_start: [f32; 2],
+    b_end: [f32; 2],
+    epsilon: f32,
+) -> Option<[f32; 2]> {
+    let da_x = a_end[0] - a_start[0];
+    let da_y = a_end[1] - a_start[1];
+    let db_x = b_end[0] - b_start[0];
+    let db_y = b_end[1] - b_start[1];
 
-    // Lines using Plucker coordinates
-    let a = cross_f32(a1_h, a2_h);
-    let b = cross_f32(b1_h, b2_h);
+    let inv_det = 1. / (da_x * db_y - da_y * db_x);
 
-    // Calculate intersection
-    let intersection_h = cross_f32(a, b);
+    let dx3 = b_start[0] - a_start[0];
+    let dy3 = b_start[1] - a_start[1];
 
-    // Divide out perspective coordinate
-    let z_inv = 1. / intersection_h[2];
-    [intersection_h[0] * z_inv, intersection_h[1] * z_inv]
-}
+    let ta_det = dx3 * db_y - dy3 * db_x;
+    let tb_det = dx3 * da_y - dy3 * da_x;
 
-#[inline]
-fn dot_f32(a: [f32; 2], b: [f32; 2]) -> f32 {
-    a[0] * b[0] + a[1] * b[1]
-}
+    let pt_a = [
+        a_start[0] + ta_det * da_x * inv_det,
+        a_start[1] + ta_det * da_y * inv_det,
+    ];
+    let pt_b = [
+        b_start[0] + tb_det * db_x * inv_det,
+        b_start[1] + tb_det * db_y * inv_det,
+    ];
 
-#[inline]
-fn cross_f32(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
+    if points_coincident_f32(pt_a, pt_b, epsilon) {
+        Some(pt_a)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -815,7 +813,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -830,7 +828,7 @@ mod tests {
         let b_start = [0.5, 0.0];
         let b_end = [0.5, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -845,7 +843,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         assert!(result.is_none());
     }
 
@@ -856,7 +854,7 @@ mod tests {
         let b_start = [0.6, 0.4];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         assert!(result.is_none());
     }
 
@@ -868,7 +866,7 @@ mod tests {
         let b_start = [0.5, 0.5];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         // Collinear segments return None (det is too small)
         assert!(result.is_none());
     }
@@ -880,9 +878,20 @@ mod tests {
         let b_start = [0.0, 0.0];
         let b_end = [1.0, 0.000001]; // Almost parallel
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
         // Should be None because det is too small
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_intersect_segments_close() {
+        let a0 = [2.177941, 2.2992249];
+        let a1 = [2.1857128, 2.2375135];
+        let b0 = [2.1857483, 2.2371936];
+        let b1 = [2.1862082, 2.2374542];
+
+        let intersection = intersect_segments_f32(a0, a1, b0, b1, DEFAULT_EPSILON_F32);
+        assert!(intersection.is_none());
     }
 
     #[test]
@@ -1088,7 +1097,7 @@ mod tests {
         let b1 = [0.5, -1.0];
         let b2 = [0.5, 1.0]; // Vertical line through x=0.5
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.5, 0.0],
@@ -1103,7 +1112,7 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [1.0, 0.0]; // Line y = -x + 1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.5, 0.5],
@@ -1118,7 +1127,7 @@ mod tests {
         let b1 = [0.0, -1.0];
         let b2 = [0.0, 1.0]; // Vertical line through origin
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.0, 0.0],
@@ -1135,7 +1144,7 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [2.0, 0.0];
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
         // These lines should intersect at (1, 0.5)
         assert!(points_coincident_f32(
             result,
@@ -1151,111 +1160,11 @@ mod tests {
         let b1 = [-2.0, 2.0];
         let b2 = [2.0, -2.0]; // Line through origin, slope -1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.0, 0.0],
             DEFAULT_EPSILON_F32
         ));
-    }
-
-    #[test]
-    fn test_dot_orthogonal_vectors() {
-        let a = [1.0, 0.0];
-        let b = [0.0, 1.0];
-        assert_eq!(dot_f32(a, b), 0.0);
-    }
-
-    #[test]
-    fn test_dot_parallel_vectors() {
-        let a = [3.0, 4.0];
-        let b = [6.0, 8.0]; // 2 * a
-        assert_eq!(dot_f32(a, b), 50.0);
-    }
-
-    #[test]
-    fn test_dot_anti_parallel_vectors() {
-        let a = [1.0, 0.0];
-        let b = [-1.0, 0.0];
-        assert_eq!(dot_f32(a, b), -1.0);
-    }
-
-    #[test]
-    fn test_dot_same_vector() {
-        let a = [3.0, 4.0];
-        // dot(a, a) = |a|^2 = 9 + 16 = 25
-        assert_eq!(dot_f32(a, a), 25.);
-    }
-
-    #[test]
-    fn test_dot_zero_vector() {
-        let a = [5.0, 7.0];
-        let b = [0.0, 0.0];
-        assert_eq!(dot_f32(a, b), 0.0);
-    }
-
-    #[test]
-    fn test_dot_negative_coords() {
-        let a = [-2.0, -3.0];
-        let b = [4.0, 5.0];
-        // -2*4 + -3*5 = -8 - 15 = -23
-        assert_eq!(dot_f32(a, b), -23.);
-    }
-
-    #[test]
-    fn test_cross_standard_basis_x_y() {
-        let x = [1.0, 0.0, 0.0];
-        let y = [0.0, 1.0, 0.0];
-        let result = cross_f32(x, y);
-        assert_eq!(result, [0., 0., 1.]);
-    }
-
-    #[test]
-    fn test_cross_standard_basis_y_z() {
-        let y = [0.0, 1.0, 0.0];
-        let z = [0.0, 0.0, 1.0];
-        let result = cross_f32(y, z);
-        assert_eq!(result, [1., 0., 0.]);
-    }
-
-    #[test]
-    fn test_cross_parallel_vectors() {
-        let a = [2.0, 4.0, 6.0];
-        let b = [4.0, 8.0, 12.0]; // 2 * a
-        let result = cross_f32(a, b);
-        assert_eq!(result, [0., 0., 0.]);
-    }
-
-    #[test]
-    fn test_cross_anti_commutative() {
-        let a = [1.0, 2.0, 3.0];
-        let b = [4.0, 5.0, 6.0];
-        let ab = cross_f32(a, b);
-        let ba = cross_f32(b, a);
-        assert_eq!(ab, [-ba[0], -ba[1], -ba[2]]);
-    }
-
-    #[test]
-    fn test_cross_arbitrary_vectors() {
-        let a = [1.0, 2.0, 3.0];
-        let b = [4.0, 5.0, 6.0];
-        let result = cross_f32(a, b);
-        assert_eq!(result, [-3., 6., -3.])
-    }
-
-    #[test]
-    fn test_cross_zero_vector() {
-        let a = [1.0, 2.0, 3.0];
-        let zero = [0.0, 0.0, 0.0];
-        let result = cross_f32(a, zero);
-        assert_eq!(result, [0., 0., 0.])
-    }
-
-    #[test]
-    fn test_cross_negative_coords() {
-        let a = [-1.0, -2.0, -3.0];
-        let b = [1.0, 2.0, 3.0];
-        let result = cross_f32(a, b);
-        assert_eq!(result, [0., 0., 0.])
     }
 }

@@ -145,10 +145,19 @@ impl EdgeSide {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct VertexEvent<K: Kernel> {
     pub(crate) event_type: EdgeSide,
     pub(crate) edge: K::Edge,
+}
+
+impl<K: Kernel> std::fmt::Debug for VertexEvent<K> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VertexEvent")
+            .field("event_type", &self.event_type)
+            .field("edge", &self.edge)
+            .finish()
+    }
 }
 
 impl Edge for (u32, u32) {
