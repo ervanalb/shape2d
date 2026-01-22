@@ -251,8 +251,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     b.segment.edge,
                 ));
                 match shared_event_type {
-                    SweepLineEventType::End => sin_cmp_f32(shared_pt, a_other_pt, b_other_pt),
-                    SweepLineEventType::Start => sin_cmp_f32(shared_pt, b_other_pt, a_other_pt),
+                    SweepLineEventType::End => sin_cmp_f32(shared_pt, b_other_pt, a_other_pt),
+                    SweepLineEventType::Start => sin_cmp_f32(shared_pt, a_other_pt, b_other_pt),
                 }
             })
     }
@@ -273,7 +273,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         let left_pt = self.v(left_i);
         let right_pt = self.v(right_i);
         let common_pt = self.v(event_point);
-        sin_cmp_f32(left_pt, common_pt, right_pt)
+        sin_cmp_f32(left_pt, right_pt, common_pt)
     }
 
     fn sweep_line_event_point_to_triangle_vertex(
@@ -352,7 +352,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         {
             // For an interior corner, draw lines to the original vertex
             // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
-            if matches!(
+            if !matches!(
                 (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
                 (Ordering::Less, true) | (Ordering::Greater, false)
             ) {
@@ -467,7 +467,7 @@ pub fn sin_cmp_f32(common: [f32; 2], a: [f32; 2], b: [f32; 2]) -> Ordering {
     let by = b[1] - common[1];
 
     // Check sign of cross product
-    (ax * by).partial_cmp(&(ay * bx)).unwrap_or(Ordering::Equal)
+    (ay * bx).partial_cmp(&(ax * by)).unwrap_or(Ordering::Equal)
 }
 
 #[inline]
@@ -1032,8 +1032,8 @@ mod tests {
         let diagonal2 = [2.0, 2.0];
 
         // Counterclockwise ordering
-        assert_eq!(sin_cmp_f32(origin, right, up), Ordering::Greater);
-        assert_eq!(sin_cmp_f32(origin, up, right), Ordering::Less);
+        assert_eq!(sin_cmp_f32(origin, right, up), Ordering::Less);
+        assert_eq!(sin_cmp_f32(origin, up, right), Ordering::Greater);
 
         // Collinear points
         assert_eq!(sin_cmp_f32(origin, diagonal, diagonal2), Ordering::Equal);

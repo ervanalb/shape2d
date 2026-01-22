@@ -48,11 +48,10 @@ pub trait Kernel: Sized {
     /// Compute the axis-aligned bounding box of an edge
     fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect;
 
-    /// Compare the angular order of two vectors from self to a and self to b.
-    /// Returns the sign of the cross product: (a - self) x (b - self).
-    /// Greater = b is counterclockwise from a (positive cross product)
+    /// Compare the angular order of two vectors from common to a and common to b.
+    /// Less = a comes before b in counterclockwise ordering (a x b yields a positive cross product)
     /// Equal = collinear (zero cross product)
-    /// Less = b is clockwise from a (negative cross product)
+    /// Greater = a comes after b in counterclockwise ordering (a x b yields a negative cross product)
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering;
 
     // Returns the vertex that this edge starts at, and the vertex that this edge ends at.

@@ -918,11 +918,11 @@ fn triangulate_monotone<TK: TriangleKernel>(
 
                     // We might not be able to form all triangles
                     match triangle_kernel.sin_cmp(v0, v1, v2) {
-                        Ordering::Greater => {
+                        Ordering::Less => {
                             // Triangle OK -- output it
                             triangles.push(triangle_kernel.push_triangle(v0, v1, v2));
                         }
-                        Ordering::Less | Ordering::Equal => {
+                        Ordering::Greater | Ordering::Equal => {
                             // Triangle invalid -- stop iteration
                             break a;
                         }
