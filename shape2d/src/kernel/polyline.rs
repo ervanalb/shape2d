@@ -376,6 +376,12 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             return;
         }
 
+        // If the two vertices are coincident, connect them with a bevel
+        if points_coincident_f32(pt_a, pt_b, self.epsilon.value(fp_mag)) {
+            emit_edge((ix_a, ix_b));
+            return;
+        }
+
         match cap_style {
             CapStyleF32::Arc { tolerance } => {
                 // Calculate vectors from center to both points
@@ -421,27 +427,17 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             CapStyleF32::Miter { limit } => {
                 let pt_before_a = self.v(incoming_edge.0);
                 let pt_after_b = self.v(outgoing_edge.1);
-                let fp_mag = fp_mag
-                    .max(fp_mag_pt_f32(pt_before_a))
-                    .max(fp_mag_pt_f32(pt_after_b));
-                let miter_pt = intersect_lines_f32(
-                    pt_before_a,
-                    pt_a,
-                    pt_b,
-                    pt_after_b,
-                    self.epsilon.value(fp_mag),
-                )
-                .and_then(|miter_pt| {
-                    let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
-                    let dist_sq = d[0] * d[0] + d[1] * d[1];
-                    if 4. * dist_sq < limit * limit {
-                        // If 2 * miter distance < miter_limit,
-                        // emit miter
-                        Some(miter_pt)
-                    } else {
-                        None
-                    }
-                });
+                let miter_pt = intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b);
+                let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
+                let dist_sq = d[0] * d[0] + d[1] * d[1];
+                let miter_pt = if 4. * dist_sq > limit * limit {
+                    // If 2 * miter distance > miter_limit,
+                    // emit bevel
+                    None
+                } else {
+                    // Emit miter
+                    Some(miter_pt)
+                };
                 if let Some(miter_pt) = miter_pt {
                     // Emit miter
                     let miter_vertex = self.push_vertex(miter_pt);
@@ -541,7 +537,7 @@ fn point_on_segment_f32(
 }
 
 #[inline]
-fn intersect_segments_f32(
+fn intersect_segments_f32_2(
     a_start: [f32; 2],
     a_end: [f32; 2],
     b_start: [f32; 2],
@@ -585,6 +581,45 @@ fn intersect_segments_f32(
     } else {
         None
     }
+}
+
+#[inline]
+fn intersect_segments_f32(
+    a_start: [f32; 2],
+    a_end: [f32; 2],
+    b_start: [f32; 2],
+    b_end: [f32; 2],
+    _epsilon: f32, // XXX
+) -> Option<[f32; 2]> {
+    // Perform separating axis test
+    // Note: We will also return "no intersection" for any colinear segments.
+    if matches!(
+        (
+            sin_cmp_f32(a_start, b_start, a_end),
+            sin_cmp_f32(a_start, b_end, a_end)
+        ),
+        (Ordering::Equal, _)
+            | (_, Ordering::Equal)
+            | (Ordering::Greater, Ordering::Greater)
+            | (Ordering::Less, Ordering::Less)
+    ) {
+        return None;
+    }
+    if matches!(
+        (
+            sin_cmp_f32(b_start, a_start, b_end),
+            sin_cmp_f32(b_start, a_end, b_end)
+        ),
+        (Ordering::Equal, _)
+            | (_, Ordering::Equal)
+            | (Ordering::Greater, Ordering::Greater)
+            | (Ordering::Less, Ordering::Less)
+    ) {
+        return None;
+    }
+
+    // We know the segments intersect, so fall back to line-line intersection algorithm
+    Some(intersect_lines_f32(a_start, a_end, b_start, b_end))
 }
 
 #[inline]
@@ -678,6 +713,66 @@ fn select_vertex<T>(event_type: EdgeSide, edge: (T, T)) -> T {
 
 #[inline]
 fn intersect_lines_f32(
+    a_start: [f32; 2],
+    a_end: [f32; 2],
+    b_start: [f32; 2],
+    b_end: [f32; 2],
+) -> [f32; 2] {
+    // Promote to homogeneous coordinates
+    let a_start_h = [a_start[0], a_start[1], 1.0];
+    let a_end_h = [a_end[0], a_end[1], 1.0];
+    let b_start_h = [b_start[0], b_start[1], 1.0];
+    let b_end_h = [b_end[0], b_end[1], 1.0];
+
+    // Lines using Plucker coordinates
+    let a = cross_f32(a_start_h, a_end_h);
+    let b = cross_f32(b_start_h, b_end_h);
+
+    // Calculate intersection
+    let intersection_h = cross_f32(a, b);
+
+    // Divide out perspective coordinate
+    let z_inv = 1. / intersection_h[2];
+    let first_guess = [intersection_h[0] * z_inv, intersection_h[1] * z_inv];
+
+    // Subtract the first guess from our coordinates and do it all again
+    // to gain accuracy
+
+    let a_start_h = [
+        a_start[0] - first_guess[0],
+        a_start[1] - first_guess[1],
+        1.0,
+    ];
+    let a_end_h = [a_end[0] - first_guess[0], a_end[1] - first_guess[1], 1.0];
+    let b_start_h = [
+        b_start[0] - first_guess[0],
+        b_start[1] - first_guess[1],
+        1.0,
+    ];
+    let b_end_h = [b_end[0] - first_guess[0], b_end[1] - first_guess[1], 1.0];
+    let a = cross_f32(a_start_h, a_end_h);
+    let b = cross_f32(b_start_h, b_end_h);
+    let intersection_h = cross_f32(a, b);
+    let z_inv = 1. / intersection_h[2];
+    let intersection = [intersection_h[0] * z_inv, intersection_h[1] * z_inv];
+
+    [
+        first_guess[0] + intersection[0],
+        first_guess[1] + intersection[1],
+    ]
+}
+
+#[inline]
+fn cross_f32(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+#[inline]
+fn intersect_lines_f32_2(
     a_start: [f32; 2],
     a_end: [f32; 2],
     b_start: [f32; 2],
@@ -1115,7 +1210,7 @@ mod tests {
         let b1 = [0.5, -1.0];
         let b2 = [0.5, 1.0]; // Vertical line through x=0.5
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.5, 0.0], EPSILON_MIN_F32));
     }
 
@@ -1126,7 +1221,7 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [1.0, 0.0]; // Line y = -x + 1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.5, 0.5], EPSILON_MIN_F32));
     }
 
@@ -1137,7 +1232,7 @@ mod tests {
         let b1 = [0.0, -1.0];
         let b2 = [0.0, 1.0]; // Vertical line through origin
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
     }
 
@@ -1150,7 +1245,7 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [2.0, 0.0];
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2);
         // These lines should intersect at (1, 0.5)
         assert!(points_coincident_f32(result, [1.0, 0.5], EPSILON_MIN_F32));
     }
@@ -1162,7 +1257,7 @@ mod tests {
         let b1 = [-2.0, 2.0];
         let b2 = [2.0, -2.0]; // Line through origin, slope -1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
     }
 }
