@@ -144,7 +144,7 @@ struct Demo {
     edit_geometry_text: String,
 }
 
-const ARROW_SIZE: f64 = 0.04;
+const ARROW_SIZE_PIXELS: f64 = 12.0; // Arrow size in screen pixels
 const ARC_TOLERANCE: f32 = 0.001;
 const MITER_LIMIT: f32 = 1.;
 
@@ -494,8 +494,19 @@ impl Demo {
         tip: [f64; 2],
         color: egui::Color32,
         line_width: f32,
-        arrow_size: f64,
     ) {
+        // Calculate arrow size in plot coordinates based on screen pixels
+        let plot_bounds = plot_ui.plot_bounds();
+        let screen_rect = plot_ui.response().rect;
+
+        // Calculate pixels per plot unit (average of x and y scales)
+        let pixels_per_unit_x = screen_rect.width() as f64 / plot_bounds.width();
+        let pixels_per_unit_y = screen_rect.height() as f64 / plot_bounds.height();
+        let pixels_per_unit = (pixels_per_unit_x + pixels_per_unit_y) / 2.0;
+
+        // Convert arrow size from pixels to plot coordinates
+        let arrow_size = ARROW_SIZE_PIXELS / pixels_per_unit;
+
         // Calculate direction vector
         let dx = tip[0] - origin[0];
         let dy = tip[1] - origin[1];
@@ -859,7 +870,6 @@ It runs the input data through each of these steps sequentially, and shows you t
                                 tip,
                                 colors.triangulation,
                                 2.0,
-                                ARROW_SIZE,
                             );
                         }
 
@@ -880,7 +890,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.input_edges);
                         for (origin, tip) in input_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.input, 2.5, ARROW_SIZE);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.input, 2.5);
                         }
 
                         // Draw input vertices (with highlighting for draggable/dragged)
@@ -912,7 +922,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.cleaned_edges);
                         for (origin, tip) in cleaned_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned, 2.0, ARROW_SIZE);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned, 2.0);
                         }
 
                         // Draw cleaned vertices
@@ -934,7 +944,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.clipped_edges);
                         for (origin, tip) in clipped_arrows {
-                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped, 2.5, ARROW_SIZE);
+                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped, 2.5);
                         }
 
                         // Draw clipped vertices
@@ -962,7 +972,6 @@ It runs the input data through each of these steps sequentially, and shows you t
                                 tip,
                                 colors.raw_offset,
                                 2.0,
-                                ARROW_SIZE,
                             );
                         }
 
@@ -991,7 +1000,6 @@ It runs the input data through each of these steps sequentially, and shows you t
                                 tip,
                                 colors.cleaned_offset,
                                 2.0,
-                                ARROW_SIZE,
                             );
                         }
 
@@ -1020,7 +1028,6 @@ It runs the input data through each of these steps sequentially, and shows you t
                                 tip,
                                 colors.clipped_offset,
                                 2.5,
-                                ARROW_SIZE,
                             );
                         }
 
