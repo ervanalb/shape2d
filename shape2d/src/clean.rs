@@ -208,9 +208,14 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
             .map(|&(_, e)| e)
     }
 
+    fn clean(&mut self) {
+        while !self.dirty_set.is_empty() {
+            self.clean_one_thing();
+        }
+    }
+
     /// Run the cleaning algorithm
-    fn clean(&mut self) -> Result<(), ()> {
-        //let mut temp_count = 0;
+    fn clean_one_thing(&mut self) {
         while let Some(&dirty_edge) = self.dirty_set.first() {
             // Get edge info
             let dirty_info = &self.edge_info.get(&dirty_edge).unwrap();
@@ -333,17 +338,11 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                 self.dirty_set.pop_first();
             }
 
-            // Handle the action if one was found
-            //if let Some(action) = action.as_ref() {
-            //    temp_count += 1;
-            //    if temp_count > 200 {
-            //        return Err(());
-            //    }
-            //    println!("edges = {:?}", self.extract_edges());
-            //    dbg!(action);
-            //}
+            let Some(action) = action else {
+                continue;
+            };
             match action {
-                Some(Action::CancelEdges { e1, e2 }) => {
+                Action::CancelEdges { e1, e2 } => {
                     // Remove both edges
                     let old_1 = self.remove(e1);
                     let old_2 = self.remove(e2);
@@ -363,7 +362,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         );
                     }
                 }
-                Some(Action::MergeVertices { v1, v2 }) => {
+                Action::MergeVertices { v1, v2 } => {
                     // Add merged vertex as a new vertex
                     let merged_vertex = self.kernel.merged_vertex(v1, v2);
 
@@ -386,7 +385,7 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                         }
                     }
                 }
-                Some(Action::MergeEdges { e1, e2 }) => {
+                Action::MergeEdges { e1, e2 } => {
                     // Construct merged edges
                     let (new_e1, new_e2) = self.kernel.merged_edges(e1, e2);
 
@@ -401,11 +400,11 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     self.insert(new_e1, old_e1.hilbert_value, old_e1.multiplicity);
                     self.insert(new_e2, old_e1.hilbert_value, old_e2.multiplicity);
                 }
-                Some(Action::SplitEdge {
+                Action::SplitEdge {
                     edge,
                     split_vertex: old_split_vertex,
                     pt,
-                }) => {
+                } => {
                     // Add split point as a new vertex
                     let new_split_vertex = self.kernel.push_vertex(pt);
 
@@ -428,11 +427,11 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     self.insert(new_e1, old.hilbert_value, old.multiplicity);
                     self.insert(new_e2, old.hilbert_value, old.multiplicity);
                 }
-                Some(Action::SplitBothEdges {
+                Action::SplitBothEdges {
                     e1: edge_a,
                     e2: edge_b,
                     pt: intersection,
-                }) => {
+                } => {
                     let vertex = self.kernel.push_vertex(intersection);
                     let (edge_a1, edge_a2) = self.kernel.split_edge(edge_a, vertex);
                     let (edge_b1, edge_b2) = self.kernel.split_edge(edge_b, vertex);
@@ -444,10 +443,9 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
                     self.insert(edge_b1, old_b.hilbert_value, old_b.multiplicity);
                     self.insert(edge_b2, old_b.hilbert_value, old_b.multiplicity);
                 }
-                None => {}
             }
+            break; // This function only handles one action
         }
-        Ok(())
     }
 
     /// Extract the final clean edge list
@@ -463,24 +461,15 @@ impl<'a, K: Kernel> SpatialIndex<'a, K> {
 pub fn partial_clean<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = (K::Edge, DirtyFlag)>,
-) -> Result<Vec<K::Edge>, ()> {
+) -> Vec<K::Edge> {
     let mut spatial_index = SpatialIndex::new(kernel, edges);
-    spatial_index.clean()?;
-    Ok(spatial_index.extract_edges())
-}
-
-// XXX remove falliable_clean and partial_clean returning a Result
-// Full clean: clean all edges (assumes all dirty)
-pub fn falliable_clean<K: Kernel>(
-    kernel: &mut K,
-    edges: impl Iterator<Item = K::Edge>,
-) -> Result<Vec<K::Edge>, ()> {
-    partial_clean(kernel, edges.map(|edge| (edge, DirtyFlag::Dirty)))
+    spatial_index.clean();
+    spatial_index.extract_edges()
 }
 
 // Full clean: clean all edges (assumes all dirty)
 pub fn clean<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) -> Vec<K::Edge> {
-    partial_clean(kernel, edges.map(|edge| (edge, DirtyFlag::Dirty))).unwrap()
+    partial_clean(kernel, edges.map(|edge| (edge, DirtyFlag::Dirty)))
 }
 
 #[cfg(test)]

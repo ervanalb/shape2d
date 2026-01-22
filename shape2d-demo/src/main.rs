@@ -176,11 +176,7 @@ impl ProcessingResults {
         let mut kernel = Kernel::new_with_epsilon(input_vertices.to_vec(), epsilon);
 
         // Step 1: Clean the edges (remove intersections)
-        let cleaned_edges = shape2d::falliable_clean(&mut kernel, input_edges.iter().copied())
-            .unwrap_or_else(|_| {
-                println!("vertices = {:?}", kernel.vertices);
-                panic!();
-            });
+        let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());
 
         // Step 2: Clip with selected winding rule
         let winding_fn = winding_rule.as_function();
@@ -214,21 +210,15 @@ impl ProcessingResults {
         };
 
         // Step 4: Clean again
-        let cleaned_offset_edges =
-            shape2d::falliable_clean(&mut kernel, raw_offset_edges.iter().copied()).unwrap_or_else(
-                |_| {
-                    println!("vertices = {:?}", kernel.vertices);
-                    panic!();
-                },
-            );
+        let cleaned_offset_edges = clean(&mut kernel, raw_offset_edges.iter().copied());
 
         // Step 5: Clip again
         let clipped_offset_edges =
             match clip(&mut kernel, cleaned_offset_edges.iter().copied(), |f| f > 0) {
                 Ok(edges) => edges,
                 Err(e) => {
-                    error = Some(format!("Clipping error: {:?}", e));
-                    eprintln!("Clipping error! {:?}", e);
+                    error = Some(format!("Offset clipping error: {:?}", e));
+                    eprintln!("Offset clipping error! {:?}", e);
                     dbg!(&kernel.vertices);
                     dbg!(&cleaned_offset_edges);
                     Vec::new()

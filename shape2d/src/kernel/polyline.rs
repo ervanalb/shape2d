@@ -537,53 +537,6 @@ fn point_on_segment_f32(
 }
 
 #[inline]
-fn intersect_segments_f32_2(
-    a_start: [f32; 2],
-    a_end: [f32; 2],
-    b_start: [f32; 2],
-    b_end: [f32; 2],
-    epsilon: f32,
-) -> Option<[f32; 2]> {
-    let da_x = a_end[0] - a_start[0];
-    let da_y = a_end[1] - a_start[1];
-    let db_x = b_end[0] - b_start[0];
-    let db_y = b_end[1] - b_start[1];
-
-    let det = da_x * db_y - da_y * db_x;
-
-    let dx3 = b_start[0] - a_start[0];
-    let dy3 = b_start[1] - a_start[1];
-
-    let ta_det = dx3 * db_y - dy3 * db_x;
-    let tb_det = dx3 * da_y - dy3 * da_x;
-
-    // Check if intersection is within both edge segments
-    let s = det.signum(); // Ensure inequalities compare the right way
-    if s * ta_det > 0. && s * ta_det < s * det && s * tb_det > 0. && s * tb_det < s * det {
-        let inv_det = 1. / det;
-
-        // Compute the intersection point two different ways and make sure they agree
-        // (they might disagree if inv_det is huge)
-        let pt_a = [
-            a_start[0] + ta_det * da_x * inv_det,
-            a_start[1] + ta_det * da_y * inv_det,
-        ];
-        let pt_b = [
-            b_start[0] + tb_det * db_x * inv_det,
-            b_start[1] + tb_det * db_y * inv_det,
-        ];
-
-        if points_coincident_f32(pt_a, pt_b, epsilon) {
-            Some(pt_a)
-        } else {
-            None
-        }
-    } else {
-        None
-    }
-}
-
-#[inline]
 fn intersect_segments_f32(
     a_start: [f32; 2],
     a_end: [f32; 2],
@@ -769,43 +722,6 @@ fn cross_f32(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
         a[2] * b[0] - a[0] * b[2],
         a[0] * b[1] - a[1] * b[0],
     ]
-}
-
-#[inline]
-fn intersect_lines_f32_2(
-    a_start: [f32; 2],
-    a_end: [f32; 2],
-    b_start: [f32; 2],
-    b_end: [f32; 2],
-    epsilon: f32,
-) -> Option<[f32; 2]> {
-    let da_x = a_end[0] - a_start[0];
-    let da_y = a_end[1] - a_start[1];
-    let db_x = b_end[0] - b_start[0];
-    let db_y = b_end[1] - b_start[1];
-
-    let inv_det = 1. / (da_x * db_y - da_y * db_x);
-
-    let dx3 = b_start[0] - a_start[0];
-    let dy3 = b_start[1] - a_start[1];
-
-    let ta_det = dx3 * db_y - dy3 * db_x;
-    let tb_det = dx3 * da_y - dy3 * da_x;
-
-    let pt_a = [
-        a_start[0] + ta_det * da_x * inv_det,
-        a_start[1] + ta_det * da_y * inv_det,
-    ];
-    let pt_b = [
-        b_start[0] + tb_det * db_x * inv_det,
-        b_start[1] + tb_det * db_y * inv_det,
-    ];
-
-    if points_coincident_f32(pt_a, pt_b, epsilon) {
-        Some(pt_a)
-    } else {
-        None
-    }
 }
 
 #[inline]

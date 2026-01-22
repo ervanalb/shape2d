@@ -78,7 +78,6 @@ pub fn offset_raw<K: Kernel>(
                         (outgoing.event_type, incoming.event_type),
                         (EdgeSide::Tail, EdgeSide::Head)
                     ) {
-                        panic!();
                         return Err(OffsetError::Topology);
                     }
                     edge_junctions.push((incoming.edge, outgoing.edge));
