@@ -100,6 +100,7 @@ pub trait Kernel: Sized {
         segment: &SweepLineSegment<Self>,
     ) -> impl Iterator<Item = <Self::TriangleKernel as TriangleKernel>::Vertex>;
 
+    // Offset methods
     fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering;
 
     fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge;

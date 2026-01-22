@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 
-const DEFAULT_EPSILON_F32: f32 = 1e-5;
+const EPSILON_MIN_F32: f32 = 1e-5;
+const EPSILON_RATE_F32: f32 = 1e-5;
 
 use crate::{
     kernel::{EdgeSide, Kernel, VertexEvent},
@@ -12,30 +13,30 @@ use crate::{
 /// Trait for providing epsilon values to the F32 kernel
 pub trait EpsilonProviderF32 {
     /// Returns the epsilon value to use for geometric comparisons
-    fn value(&self) -> f32;
+    fn value(&self, fp_mag: f32) -> f32;
 }
 
-/// Implementation for f32 - epsilon() returns the value itself
+/// Implementation for f32
 impl EpsilonProviderF32 for f32 {
     #[inline]
-    fn value(&self) -> f32 {
-        *self
+    fn value(&self, fp_mag: f32) -> f32 {
+        self.max(EPSILON_RATE_F32 * fp_mag)
     }
 }
 
 /// Constant epsilon provider - returns a compile-time constant
 #[derive(Debug)]
-pub struct ConstantEpsilon;
+pub struct DefaultEpsilon;
 
-impl EpsilonProviderF32 for ConstantEpsilon {
+impl EpsilonProviderF32 for DefaultEpsilon {
     #[inline]
-    fn value(&self) -> f32 {
-        DEFAULT_EPSILON_F32
+    fn value(&self, fp_mag: f32) -> f32 {
+        EPSILON_MIN_F32.max(EPSILON_RATE_F32 * fp_mag)
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct F32<E: EpsilonProviderF32 = ConstantEpsilon> {
+pub struct F32<E: EpsilonProviderF32 = DefaultEpsilon> {
     pub vertices: Vec<[f32; 2]>,
     pub epsilon: E,
 }
@@ -52,11 +53,11 @@ impl<E: EpsilonProviderF32> F32<E> {
     }
 }
 
-impl F32<ConstantEpsilon> {
+impl F32<DefaultEpsilon> {
     pub fn new(vertices: Vec<[f32; 2]>) -> Self {
         Self {
             vertices,
-            epsilon: ConstantEpsilon,
+            epsilon: DefaultEpsilon,
         }
     }
 }
@@ -86,7 +87,10 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     type OffsetAmount = f32;
 
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
-        points_coincident_f32(self.v(a), self.v(b), self.epsilon.value())
+        let pt_a = self.v(a);
+        let pt_b = self.v(b);
+        let fp_mag = fp_mag_pt_f32(pt_a).max(fp_mag_pt_f32(pt_b));
+        points_coincident_f32(self.v(a), self.v(b), self.epsilon.value(fp_mag))
     }
 
     fn edges_coincident(&self, _a: Self::Edge, _b: Self::Edge) -> bool {
@@ -96,11 +100,18 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     }
 
     fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point> {
+        let vertex_pt = self.v(vertex);
+        let edge_start_pt = self.v(edge.0);
+        let edge_end_pt = self.v(edge.1);
+        let fp_mag = fp_mag_pt_f32(vertex_pt)
+            .max(fp_mag_pt_f32(edge_start_pt))
+            .max(fp_mag_pt_f32(edge_end_pt));
+
         point_on_segment_f32(
-            self.v(vertex),
-            self.v(edge.0),
-            self.v(edge.1),
-            self.epsilon.value(),
+            vertex_pt,
+            edge_start_pt,
+            edge_end_pt,
+            self.epsilon.value(fp_mag),
         )
     }
 
@@ -110,13 +121,23 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             return None;
         }
 
+        let pt_a0 = self.v(a.0);
+        let pt_a1 = self.v(a.1);
+        let pt_b0 = self.v(b.0);
+        let pt_b1 = self.v(b.1);
+        let fp_mag = fp_mag_pt_f32(pt_a0)
+            .max(fp_mag_pt_f32(pt_a1))
+            .max(fp_mag_pt_f32(pt_b0))
+            .max(fp_mag_pt_f32(pt_b1));
+
+        // XXX
         if b.0 == 224 && b.1 == 223 && a.0 == 118 && a.1 == 230 {
             dbg!(intersect_segments_f32(
                 dbg!(self.v(a.0)),
                 dbg!(self.v(a.1)),
                 dbg!(self.v(b.0)),
                 dbg!(self.v(b.1)),
-                self.epsilon.value(),
+                self.epsilon.value(fp_mag),
             ))?;
             panic!();
         }
@@ -126,7 +147,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
-            self.epsilon.value(),
+            self.epsilon.value(fp_mag),
         )?)
     }
 
@@ -145,16 +166,19 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
         extents_f32(
             edges.flat_map(|(a, b)| [self.v(a), self.v(b)]),
-            self.epsilon.value(),
+            &self.epsilon,
         )
     }
 
     fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect {
+        let edge_start_pt = self.v(edge.0);
+        let edge_end_pt = self.v(edge.1);
+        let fp_mag = fp_mag_pt_f32(edge_start_pt).max(fp_mag_pt_f32(edge_end_pt));
         segment_bbox_f32(
-            self.v(edge.0),
-            self.v(edge.1),
+            edge_start_pt,
+            edge_end_pt,
             *extents,
-            self.epsilon.value(),
+            self.epsilon.value(fp_mag),
         )
     }
 
@@ -349,17 +373,19 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         let pt_b = self.v(ix_b);
         let original_pt = self.v(original_vertex);
 
-        {
-            // For an interior corner, draw lines to the original vertex
-            // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
-            if !matches!(
-                (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
-                (Ordering::Less, true) | (Ordering::Greater, false)
-            ) {
-                emit_edge((ix_a, original_vertex));
-                emit_edge((original_vertex, ix_b));
-                return;
-            }
+        let fp_mag = fp_mag_pt_f32(pt_a)
+            .max(fp_mag_pt_f32(pt_b))
+            .max(fp_mag_pt_f32(original_pt));
+
+        // For an interior corner, draw lines to the original vertex
+        // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
+        if !matches!(
+            (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
+            (Ordering::Less, true) | (Ordering::Greater, false)
+        ) {
+            emit_edge((ix_a, original_vertex));
+            emit_edge((original_vertex, ix_b));
+            return;
         }
 
         match cap_style {
@@ -378,8 +404,9 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 // Calculate maximum angle per segment based on tolerance
                 // The sagitta (deviation) of a chord from an arc is: s = r * (1 - cos(θ/2))
                 // Solving for θ when s = tolerance: θ = 2 * arccos(1 - tolerance/r)
-                let cos_arg = (1.0 - tolerance.max(self.epsilon.value()) / offset_amount.abs())
-                    .clamp(-1.0, 1.0);
+                let cos_arg = (1.0
+                    - tolerance.max(self.epsilon.value(fp_mag)) / offset_amount.abs())
+                .clamp(-1.0, 1.0);
                 let max_angle_per_segment = 2.0 * cos_arg.acos();
                 let num_segments =
                     (delta_angle.abs() / max_angle_per_segment).ceil().max(1.) as u32;
@@ -406,19 +433,27 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             CapStyleF32::Miter { limit } => {
                 let pt_before_a = self.v(incoming_edge.0);
                 let pt_after_b = self.v(outgoing_edge.1);
-                let miter_pt =
-                    intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b, self.epsilon.value())
-                        .and_then(|miter_pt| {
-                            let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
-                            let dist_sq = d[0] * d[0] + d[1] * d[1];
-                            if 4. * dist_sq < limit * limit {
-                                // If 2 * miter distance < miter_limit,
-                                // emit miter
-                                Some(miter_pt)
-                            } else {
-                                None
-                            }
-                        });
+                let fp_mag = fp_mag
+                    .max(fp_mag_pt_f32(pt_before_a))
+                    .max(fp_mag_pt_f32(pt_after_b));
+                let miter_pt = intersect_lines_f32(
+                    pt_before_a,
+                    pt_a,
+                    pt_b,
+                    pt_after_b,
+                    self.epsilon.value(fp_mag),
+                )
+                .and_then(|miter_pt| {
+                    let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
+                    let dist_sq = d[0] * d[0] + d[1] * d[1];
+                    if 4. * dist_sq < limit * limit {
+                        // If 2 * miter distance < miter_limit,
+                        // emit miter
+                        Some(miter_pt)
+                    } else {
+                        None
+                    }
+                });
                 if let Some(miter_pt) = miter_pt {
                     // Emit miter
                     let miter_vertex = self.push_vertex(miter_pt);
@@ -569,29 +604,31 @@ fn merge_points_f32(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
     [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])]
 }
 
-#[inline]
-fn extents_f32(mut points: impl Iterator<Item = [f32; 2]>, epsilon: f32) -> ExtentsF32 {
+fn extents_f32<E: EpsilonProviderF32>(
+    mut points: impl Iterator<Item = [f32; 2]>,
+    epsilon_provider: &E,
+) -> ExtentsF32 {
     let Some(first) = points.next() else {
         return Default::default();
     };
     let (min, max) = points.fold((first, first), |(min, max), point| {
         (
-            [
-                min[0].min(point[0] - epsilon),
-                min[1].min(point[1] - epsilon),
-            ],
-            [
-                max[0].max(point[0] + epsilon),
-                max[1].max(point[1] + epsilon),
-            ],
+            [min[0].min(point[0]), min[1].min(point[1])],
+            [max[0].max(point[0]), max[1].max(point[1])],
         )
     });
 
+    let fp_mag = fp_mag_pt_f32(min).max(fp_mag_pt_f32(max));
+    let epsilon = epsilon_provider.value(fp_mag);
+
     let scale = [
-        u16::MAX as f32 / (max[0] - min[0]),
-        u16::MAX as f32 / (max[1] - min[1]),
+        u16::MAX as f32 / (max[0] - min[0] + 2. * epsilon),
+        u16::MAX as f32 / (max[1] - min[1] + 2. * epsilon),
     ];
-    let offset = [-min[0] * scale[0], -min[1] * scale[1]];
+    let offset = [
+        (-min[0] - epsilon) * scale[0],
+        (-min[1] - epsilon) * scale[1],
+    ];
 
     ExtentsF32 { scale, offset }
 }
@@ -688,6 +725,11 @@ fn intersect_lines_f32(
     }
 }
 
+#[inline]
+fn fp_mag_pt_f32(pt: [f32; 2]) -> f32 {
+    pt[0].abs().max(pt[1].abs())
+}
+
 #[cfg(test)]
 mod tests {
     use std::cmp::Ordering;
@@ -698,28 +740,28 @@ mod tests {
     fn test_points_coincident_same_point() {
         let a = [0.5_f32, 0.5];
         let b = [0.5, 0.5];
-        assert!(points_coincident_f32(a, b, DEFAULT_EPSILON_F32));
+        assert!(points_coincident_f32(a, b, EPSILON_MIN_F32));
     }
 
     #[test]
     fn test_points_coincident_within_epsilon() {
         let a = [0.5_f32, 0.5];
         let b = [0.500001, 0.500001];
-        assert!(points_coincident_f32(a, b, DEFAULT_EPSILON_F32));
+        assert!(points_coincident_f32(a, b, EPSILON_MIN_F32));
     }
 
     #[test]
     fn test_points_coincident_outside_epsilon() {
         let a = [0.5_f32, 0.5];
         let b = [0.51, 0.5];
-        assert!(!points_coincident_f32(a, b, DEFAULT_EPSILON_F32));
+        assert!(!points_coincident_f32(a, b, EPSILON_MIN_F32));
     }
 
     #[test]
     fn test_points_coincident_far_apart() {
         let a = [0.0_f32, 0.0];
         let b = [1.0, 1.0];
-        assert!(!points_coincident_f32(a, b, DEFAULT_EPSILON_F32));
+        assert!(!points_coincident_f32(a, b, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -728,9 +770,9 @@ mod tests {
         let end = [1.0, 0.0];
         let mid = [0.5, 0.0];
         assert!(points_coincident_f32(
-            point_on_segment_f32(mid, start, end, DEFAULT_EPSILON_F32).unwrap(),
+            point_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap(),
             mid,
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -740,9 +782,9 @@ mod tests {
         let end = [1.0, 0.0];
         let p = [0.001, 0.0];
         assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).unwrap(),
+            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
             p,
-            DEFAULT_EPSILON_F32,
+            EPSILON_MIN_F32,
         ));
     }
 
@@ -752,9 +794,9 @@ mod tests {
         let end = [1.0, 0.0];
         let p = [0.999, 0.0];
         assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).unwrap(),
+            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
             p,
-            DEFAULT_EPSILON_F32,
+            EPSILON_MIN_F32,
         ));
     }
 
@@ -763,7 +805,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [0.5, 0.1];
-        assert!(point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).is_none());
+        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -771,7 +813,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [1.5, 0.0];
-        assert!(point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).is_none());
+        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -779,7 +821,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [-0.5, 0.0];
-        assert!(point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).is_none());
+        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -788,9 +830,9 @@ mod tests {
         let end = [1.0, 1.0];
         let mid = [0.5, 0.5];
         assert!(points_coincident_f32(
-            point_on_segment_f32(mid, start, end, DEFAULT_EPSILON_F32).unwrap(),
+            point_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap(),
             mid,
-            DEFAULT_EPSILON_F32,
+            EPSILON_MIN_F32,
         ));
     }
 
@@ -800,9 +842,9 @@ mod tests {
         let end = [1.0, 0.0];
         let p = [0.5, 0.000001]; // Very close to the line
         assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, DEFAULT_EPSILON_F32).unwrap(),
+            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
             p,
-            DEFAULT_EPSILON_F32,
+            EPSILON_MIN_F32,
         ));
     }
 
@@ -813,11 +855,11 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -828,11 +870,11 @@ mod tests {
         let b_start = [0.5, 0.0];
         let b_end = [0.5, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -843,7 +885,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         assert!(result.is_none());
     }
 
@@ -854,7 +896,7 @@ mod tests {
         let b_start = [0.6, 0.4];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         assert!(result.is_none());
     }
 
@@ -866,7 +908,7 @@ mod tests {
         let b_start = [0.5, 0.5];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         // Collinear segments return None (det is too small)
         assert!(result.is_none());
     }
@@ -878,7 +920,7 @@ mod tests {
         let b_start = [0.0, 0.0];
         let b_end = [1.0, 0.000001]; // Almost parallel
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, DEFAULT_EPSILON_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
         // Should be None because det is too small
         assert!(result.is_none());
     }
@@ -890,7 +932,7 @@ mod tests {
         let b0 = [2.1857483, 2.2371936];
         let b1 = [2.1862082, 2.2374542];
 
-        let intersection = intersect_segments_f32(a0, a1, b0, b1, DEFAULT_EPSILON_F32);
+        let intersection = intersect_segments_f32(a0, a1, b0, b1, EPSILON_MIN_F32);
         assert!(intersection.is_none());
     }
 
@@ -902,7 +944,7 @@ mod tests {
         assert!(points_coincident_f32(
             merged,
             [0.5, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -914,7 +956,7 @@ mod tests {
         assert!(points_coincident_f32(
             merged,
             [0.5, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -926,7 +968,7 @@ mod tests {
         assert!(points_coincident_f32(
             merged,
             [0.0, 0.0],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -934,8 +976,8 @@ mod tests {
     fn test_segment_bbox_horizontal() {
         let start = [0.2_f32, 0.5];
         let end = [0.8, 0.5];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox = segment_bbox_f32(start, end, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] < bbox.max[0]);
         assert!(bbox.min[1] <= bbox.max[1]);
@@ -946,8 +988,8 @@ mod tests {
     fn test_segment_bbox_vertical() {
         let start = [0.5_f32, 0.2];
         let end = [0.5, 0.8];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox = segment_bbox_f32(start, end, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] <= bbox.max[0]);
         assert!(bbox.min[1] < bbox.max[1]);
@@ -958,8 +1000,8 @@ mod tests {
     fn test_segment_bbox_diagonal() {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 1.0];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox = segment_bbox_f32(start, end, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] < bbox.max[0]);
         assert!(bbox.min[1] < bbox.max[1]);
@@ -970,8 +1012,8 @@ mod tests {
     fn test_segment_bbox_point() {
         let start = [0.5_f32, 0.5];
         let end = [0.5, 0.5];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox = segment_bbox_f32(start, end, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] <= bbox.max[0]);
         assert!(bbox.min[1] <= bbox.max[1]);
@@ -988,9 +1030,9 @@ mod tests {
         let start2 = [0.5_f32, 0.5];
         let end2 = [1., 0.5];
 
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox1 = segment_bbox_f32(start1, end1, extents, DEFAULT_EPSILON_F32);
-        let bbox2 = segment_bbox_f32(start2, end2, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox1 = segment_bbox_f32(start1, end1, extents, EPSILON_MIN_F32);
+        let bbox2 = segment_bbox_f32(start2, end2, extents, EPSILON_MIN_F32);
 
         assert!(bbox1.overlaps(&bbox2));
     }
@@ -1003,9 +1045,9 @@ mod tests {
         let start2 = [0.2_f32, 0.4];
         let end2 = [0.1, 0.5];
 
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), DEFAULT_EPSILON_F32);
-        let bbox1 = segment_bbox_f32(start1, end1, extents, DEFAULT_EPSILON_F32);
-        let bbox2 = segment_bbox_f32(start2, end2, extents, DEFAULT_EPSILON_F32);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let bbox1 = segment_bbox_f32(start1, end1, extents, EPSILON_MIN_F32);
+        let bbox2 = segment_bbox_f32(start2, end2, extents, EPSILON_MIN_F32);
 
         assert!(!bbox1.overlaps(&bbox2));
     }
@@ -1097,11 +1139,11 @@ mod tests {
         let b1 = [0.5, -1.0];
         let b2 = [0.5, 1.0]; // Vertical line through x=0.5
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.5, 0.0],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -1112,11 +1154,11 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [1.0, 0.0]; // Line y = -x + 1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.5, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -1127,11 +1169,11 @@ mod tests {
         let b1 = [0.0, -1.0];
         let b2 = [0.0, 1.0]; // Vertical line through origin
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.0, 0.0],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -1144,12 +1186,12 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [2.0, 0.0];
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         // These lines should intersect at (1, 0.5)
         assert!(points_coincident_f32(
             result,
             [1.0, 0.5],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 
@@ -1160,11 +1202,11 @@ mod tests {
         let b1 = [-2.0, 2.0];
         let b2 = [2.0, -2.0]; // Line through origin, slope -1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2, DEFAULT_EPSILON_F32).unwrap();
+        let result = intersect_lines_f32(a1, a2, b1, b2, EPSILON_MIN_F32).unwrap();
         assert!(points_coincident_f32(
             result,
             [0.0, 0.0],
-            DEFAULT_EPSILON_F32
+            EPSILON_MIN_F32
         ));
     }
 }
