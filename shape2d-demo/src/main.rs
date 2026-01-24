@@ -173,7 +173,7 @@ impl ProcessingResults {
         let input_edges = input_edges.to_vec();
 
         // Create kernel with vertices and epsilon
-        let mut kernel = Kernel::new_with_epsilon(input_vertices.to_vec(), epsilon);
+        let mut kernel = Kernel::new_with_vertices_and_epsilon(input_vertices.to_vec(), epsilon);
 
         // Step 1: Clean the edges (remove intersections)
         let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());

@@ -184,7 +184,7 @@ mod tests {
     #[test]
     fn test_simple_square() {
         // Simple square
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Positive winding rule
@@ -197,7 +197,7 @@ mod tests {
     #[test]
     fn test_empty_input() {
         // No edges
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0]]);
         let edges: Vec<(u32, u32)> = vec![];
 
         let result = clip(&mut kernel, edges.iter().copied(), |w| w > 0).unwrap();
@@ -207,7 +207,7 @@ mod tests {
     #[test]
     fn test_overlapping_squares() {
         // Two overlapping squares that should be merged
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             // First square
             [0.0, 0.0],
             [1.0, 0.0],
@@ -247,7 +247,7 @@ mod tests {
     #[test]
     fn test_square_with_hole() {
         // Outer square and inner square (hole)
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             // Outer square
             [0.0, 0.0],
             [2.0, 0.0],
@@ -285,7 +285,7 @@ mod tests {
     #[test]
     fn test_empty_output() {
         // Square with winding number that will be filtered out
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         // Rule that filters out everything
@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_multiplicity() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [-0.28425846, -0.37691897],
             [2.0, 0.0],
             [2.0, 2.0],

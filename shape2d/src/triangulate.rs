@@ -971,7 +971,7 @@ mod tests {
     #[test]
     fn test_simple_triangle() {
         // Simple triangle - has start, top, and end vertices
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 0)];
         let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -984,7 +984,7 @@ mod tests {
     #[test]
     fn test_simple_quad() {
         // Simple convex quad - has start, top, bottom, and end vertices
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1010,7 +1010,7 @@ mod tests {
                 .collect();
             let edges = (0..sides).map(|i| (i, (i + 1) % sides));
 
-            let mut kernel = Kernel::new(verts);
+            let mut kernel = Kernel::new_with_vertices(verts);
             let mut triangle_kernel = TriangleKernelF32::new();
 
             let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges).unwrap();
@@ -1035,7 +1035,7 @@ mod tests {
         // 2 = top
         // 0 = bottom
         // 1 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [3.0, 0.0], // 0
             [3.0, 2.0], // 1
             [2.0, 2.0], // 2
@@ -1066,7 +1066,7 @@ mod tests {
         // 1 = split
         // 0 = end
         // 2 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [2.0, 0.0], // 0
             [1., 1.],   // 1
             [2.0, 2.0], // 2
@@ -1097,7 +1097,7 @@ mod tests {
         // 3 = top
         // 1 = end
         // 2 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [1.0, 0.0], // 0
             [2.0, 0.0], // 1
             [2.0, 2.0], // 2
@@ -1130,7 +1130,7 @@ mod tests {
         // 2 = start
         // 3 = merge
         // 1 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0], // 0
             [2.0, 1.0], // 1
             [0.0, 2.0], // 2
@@ -1161,7 +1161,7 @@ mod tests {
         // 2 = top
         // 4 = merge
         // 4 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0], // 0
             [1.0, 0.0], // 1
             [1.0, 2.0], // 2
@@ -1193,7 +1193,7 @@ mod tests {
         // 2 = merge
         // 1 = end
         // 3 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0], // 0
             [3.0, 0.0], // 1
             [2.0, 1.0], // 2
@@ -1226,7 +1226,7 @@ mod tests {
         // 4 = split
         // 1 = end
         // 2 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0], // 0
             [2.0, 0.0], // 1
             [2.0, 2.0], // 2
@@ -1264,7 +1264,7 @@ mod tests {
         // 3 = split (helper=1)
         // 2 = end
         // 4 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 1.0], // 0
             [3.0, 1.0], // 1
             [5.0, 0.0], // 2
@@ -1314,7 +1314,7 @@ mod tests {
         // 3 = split (helper=1)
         // 2 = end
         // 4 = end
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 1.0], // 0
             [4.0, 1.0], // 1
             [5.0, 0.0], // 2
@@ -1380,7 +1380,7 @@ mod tests {
             ("down", down_comb),
         ] {
             eprintln!("Testing comb: {}", desc);
-            let mut kernel = Kernel::new(comb.to_vec());
+            let mut kernel = Kernel::new_with_vertices(comb.to_vec());
 
             let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -1439,7 +1439,7 @@ mod tests {
             ("down", down_comb),
         ] {
             eprintln!("Testing degenerate comb: {}", desc);
-            let mut kernel = Kernel::new(comb.to_vec());
+            let mut kernel = Kernel::new_with_vertices(comb.to_vec());
 
             let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -1454,7 +1454,7 @@ mod tests {
     #[test]
     fn test_square_with_holes() {
         // Square with three triangular holes (not touching edges)
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             // Outer square (counter-clockwise)
             [0.0, 0.0],   // 0
             [10.0, 0.0],  // 1
@@ -1516,7 +1516,7 @@ mod tests {
         //
         // Outer boundary: 0-1-2-3-4-5-6-7
         // Four triangular holes connecting them
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             // Outer boundary
             [0.0, 0.0], // 0 - bottom-left corner
             [2.0, 0.0], // 1 - bottom edge midpoint
@@ -1579,7 +1579,7 @@ mod tests {
         //    /~\
         //    0-1
 
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [1.0, 0.0], // 0
             [3.0, 0.0], // 1
             [4.0, 1.0], // 2
@@ -1619,7 +1619,7 @@ mod tests {
     #[test]
     fn test_star_cross_2() {
         // Same as star_cross but rotated 45 degrees
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 1.0],
             [1.0, 0.0],
             [3.0, 0.0],
@@ -1658,7 +1658,7 @@ mod tests {
 
     #[test]
     fn test_touching_triangles() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [1.0034493, 0.002921236],
             [2.0, 0.0],
             [2.0, 2.0],
@@ -1690,7 +1690,7 @@ mod tests {
 
     #[test]
     fn test_touching_triangles_2() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.004632079, -0.001372324],
             [2.0, 0.0],
             [1.0135162, 2.9981308],

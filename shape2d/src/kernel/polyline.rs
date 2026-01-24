@@ -54,7 +54,14 @@ impl<E: EpsilonProviderF32> F32<E> {
 }
 
 impl F32<DefaultEpsilon> {
-    pub fn new(vertices: Vec<[f32; 2]>) -> Self {
+    pub fn new() -> Self {
+        Self {
+            vertices: vec![],
+            epsilon: DefaultEpsilon,
+        }
+    }
+
+    pub fn new_with_vertices(vertices: Vec<[f32; 2]>) -> Self {
         Self {
             vertices,
             epsilon: DefaultEpsilon,
@@ -63,7 +70,7 @@ impl F32<DefaultEpsilon> {
 }
 
 impl<E: EpsilonProviderF32> F32<E> {
-    pub fn new_with_epsilon(vertices: Vec<[f32; 2]>, epsilon: E) -> Self {
+    pub fn new_with_vertices_and_epsilon(vertices: Vec<[f32; 2]>, epsilon: E) -> Self {
         Self { vertices, epsilon }
     }
 }

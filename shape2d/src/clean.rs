@@ -479,7 +479,7 @@ mod tests {
 
     #[test]
     fn test_simple_two_edges() {
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
 
         let edges = [(0, 1), (2, 3)];
 
@@ -489,7 +489,7 @@ mod tests {
 
     #[test]
     fn test_intersecting_edges() {
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]]);
 
         // Two edges that intersect
         let edges = [(0, 1), (2, 3)];
@@ -503,7 +503,7 @@ mod tests {
 
     #[test]
     fn test_vertex_on_edge() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0],
             [1.0, 0.0],
             [0.5, 0.0], // On the first edge
@@ -518,7 +518,7 @@ mod tests {
 
     #[test]
     fn test_coincident_vertices() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0],
             [1.0, 0.0],
             [0.0, 0.0], // Coincident with vertex 0
@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn test_square_polygon() {
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
 
         let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -547,7 +547,7 @@ mod tests {
 
     #[test]
     fn test_t_junction() {
-        let mut kernel = Kernel::new(vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]]);
 
         // T-junction: horizontal edge intersected by vertical edge
         let edges = [(0, 1), (2, 3)];
@@ -561,7 +561,7 @@ mod tests {
 
     #[test]
     fn test_multiple_intersections() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             // Horizontal line
             [0.0, 0.5],
             [1.0, 0.5],
@@ -586,7 +586,7 @@ mod tests {
     #[test]
     fn test_complex_polygon() {
         // Star-like pattern
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.5, 0.0], // Top
             [0.7, 0.5], // Right
             [0.5, 1.0], // Bottom
@@ -606,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_canceling_edges() {
-        let mut kernel = Kernel::new(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]);
+        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]);
 
         // Two edges with same endpoints but opposite directions should cancel
         let edges = [
@@ -623,7 +623,7 @@ mod tests {
 
     #[test]
     fn test_merged_vertices_remove_short_edge() {
-        let mut kernel = Kernel::new(vec![
+        let mut kernel = Kernel::new_with_vertices(vec![
             [0.0, 0.0],
             [0.0, 0.0], // Coincident with vertex 0
             [1.0, 0.0],
@@ -646,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_complete_clean() {
-        let mut kernel = Kernel::new_with_epsilon(
+        let mut kernel = Kernel::new_with_vertices_and_epsilon(
             vec![
                 [0.0, 0.0],
                 [2.0, 0.0],
@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn test_halting() {
-        let mut kernel = Kernel::new_with_epsilon(
+        let mut kernel = Kernel::new_with_vertices_and_epsilon(
             vec![
                 [0.04894346, 3.309017],
                 [1.0, 3.6618032],
@@ -686,7 +686,7 @@ mod tests {
 
     #[test]
     fn test_halting2() {
-        let mut kernel = Kernel::new_with_epsilon(
+        let mut kernel = Kernel::new_with_vertices_and_epsilon(
             vec![
                 [1.0, 4.0],
                 [1.2351141, 3.3236067],
