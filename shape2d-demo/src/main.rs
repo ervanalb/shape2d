@@ -146,7 +146,7 @@ struct Demo {
 
 const ARROW_SIZE_PIXELS: f64 = 12.0; // Arrow size in screen pixels
 const ARC_TOLERANCE: f32 = 0.001;
-const MITER_LIMIT: f32 = 1.;
+const MITER_LIMIT: f32 = 4.;
 
 struct ProcessingResults {
     kernel: Kernel<f32>,
@@ -864,13 +864,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                         // Draw triangle edges as arrows
                         let triangle_arrows = self.processing_results.triangles_to_arrows();
                         for (origin, tip) in triangle_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                colors.triangulation,
-                                2.0,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.triangulation, 2.0);
                         }
 
                         // Draw triangle vertices
@@ -966,13 +960,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.raw_offset_edges);
                         for (origin, tip) in raw_offset_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                colors.raw_offset,
-                                2.0,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.raw_offset, 2.0);
                         }
 
                         // Draw raw offset vertices
@@ -994,13 +982,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.cleaned_offset_edges);
                         for (origin, tip) in cleaned_offset_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                colors.cleaned_offset,
-                                2.0,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.cleaned_offset, 2.0);
                         }
 
                         // Draw cleaned offset vertices
@@ -1022,13 +1004,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                             .processing_results
                             .edges_to_arrows(&self.processing_results.clipped_offset_edges);
                         for (origin, tip) in clipped_offset_arrows {
-                            Self::draw_arrow(
-                                plot_ui,
-                                origin,
-                                tip,
-                                colors.clipped_offset,
-                                2.5,
-                            );
+                            Self::draw_arrow(plot_ui, origin, tip, colors.clipped_offset, 2.5);
                         }
 
                         // Draw clipped offset vertices

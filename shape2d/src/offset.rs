@@ -307,4 +307,16 @@ mod tests {
         // offset_raw should not return a topology error
         offset_raw(&mut kernel, edges.into_iter(), 0.1, &CapStyleF32::Bevel).unwrap();
     }
+
+    #[test]
+    fn test_offset_segments() {
+        let mut kernel = Kernel::new_with_vertices(vec![[0., 0.], [1., 1.]]);
+        let edges = vec![(0, 1)];
+
+        let edges =
+            offset_segments_raw(&mut kernel, edges.into_iter(), 0.1, &CapStyleF32::Bevel).unwrap();
+
+        // Offset of a line with beveled edges should be a rectangle
+        assert_eq!(edges.len(), 4);
+    }
 }

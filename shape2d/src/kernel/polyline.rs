@@ -334,7 +334,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     // Points are within 90 degrees of each other,
                     // so we can use sin_cmp to compare them
                     sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
-            }).then_with(|| {
+            })
+            .then_with(|| {
                 // Then by event type--incoming before outgoing:
                 //  ----->  sorted second
                 // X
@@ -384,9 +385,9 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
 
         // For an interior corner, draw lines to the original vertex
         // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
-        if !matches!(
+        if matches!(
             (sin_cmp_f32(original_pt, pt_a, pt_b), offset_amount >= 0.),
-            (Ordering::Less, true) | (Ordering::Greater, false)
+            (Ordering::Greater, true) | (Ordering::Less, false)
         ) {
             emit_edge((ix_a, original_vertex));
             emit_edge((original_vertex, ix_b));
@@ -442,28 +443,28 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 emit_edge((ix_a, ix_b));
             }
             CapStyleF32::Miter { limit } => {
-                let pt_before_a = self.v(incoming_edge.0);
-                let pt_after_b = self.v(outgoing_edge.1);
-                let miter_pt = intersect_lines_f32(pt_before_a, pt_a, pt_b, pt_after_b);
-                let d = [miter_pt[0] - original_pt[0], miter_pt[1] - original_pt[1]];
-                let dist_sq = d[0] * d[0] + d[1] * d[1];
-                let miter_pt = if 4. * dist_sq > limit * limit {
-                    // If 2 * miter distance > miter_limit,
-                    // emit bevel
-                    None
-                } else {
-                    // Emit miter
-                    Some(miter_pt)
-                };
-                if let Some(miter_pt) = miter_pt {
-                    // Emit miter
-                    let miter_vertex = self.push_vertex(miter_pt);
-                    emit_edge((ix_a, miter_vertex));
-                    emit_edge((miter_vertex, ix_b));
-                } else {
-                    // Emit bevel
-                    emit_edge((ix_a, ix_b));
-                }
+                let limit = limit * offset_amount.abs();
+                let before_pt_a = self.v(incoming_edge.0);
+                let after_pt_b = self.v(outgoing_edge.1);
+
+                // Extended edges `a` and `b` by `limit`
+                // (they may intersect, but this will be clipped away.)
+
+                let a_vec = [pt_a[0] - before_pt_a[0], pt_a[1] - before_pt_a[1]];
+                let a_len = a_vec[0].hypot(a_vec[1]);
+                let a_factor = limit / a_len;
+                let extended_a_pt = [pt_a[0] + a_vec[0] * a_factor, pt_a[1] + a_vec[1] * a_factor];
+                let extended_a_vertex = self.push_vertex(extended_a_pt);
+
+                let b_vec = [pt_b[0] - after_pt_b[0], pt_b[1] - after_pt_b[1]];
+                let b_len = b_vec[0].hypot(b_vec[1]);
+                let b_factor = limit / b_len;
+                let extended_b_pt = [pt_b[0] + b_vec[0] * b_factor, pt_b[1] + b_vec[1] * b_factor];
+                let extended_b_vertex = self.push_vertex(extended_b_pt);
+
+                emit_edge((ix_a, extended_a_vertex));
+                emit_edge((extended_a_vertex, extended_b_vertex));
+                emit_edge((extended_b_vertex, ix_b));
             }
         }
     }
