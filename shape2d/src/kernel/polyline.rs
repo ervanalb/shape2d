@@ -334,6 +334,16 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     // Points are within 90 degrees of each other,
                     // so we can use sin_cmp to compare them
                     sin_cmp_f32(shared_pt, a_other_pt, b_other_pt))
+            }).then_with(|| {
+                // Then by event type--incoming before outgoing:
+                //  ----->  sorted second
+                // X
+                //  <-----  sorted first
+                // This sorting nudges two equal but opposite edges
+                // in such a way that the area encountered between them is slightly negative,
+                // encouraging the topology-finding algorithm
+                // to avoid joining these two edges to each other if possible.
+                a.event_type.cmp(&b.event_type).reverse()
             })
     }
 

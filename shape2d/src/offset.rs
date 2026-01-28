@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use crate::{
     ClippingError, clean, clip,
-    kernel::{EdgeSide, Kernel, VertexEvent},
+    kernel::{Edge, EdgeSide, Kernel, VertexEvent},
 };
 
 /// Error type for offset operations.
@@ -164,6 +164,32 @@ pub fn offset<K: Kernel>(
     Ok(edges)
 }
 
+pub fn offset_segments_raw<K: Kernel>(
+    kernel: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
+    offset_amount: K::OffsetAmount,
+    cap_style: &K::CapStyle,
+) -> Result<Vec<K::Edge>, OffsetError> {
+    offset_raw(
+        kernel,
+        edges.flat_map(|e| [e, e.reversed()]),
+        offset_amount,
+        cap_style,
+    )
+}
+
+pub fn offset_segments<K: Kernel>(
+    kernel: &mut K,
+    edges: impl Iterator<Item = K::Edge>,
+    offset_amount: K::OffsetAmount,
+    cap_style: &K::CapStyle,
+) -> Result<Vec<K::Edge>, OffsetError> {
+    let edges = offset_segments_raw(kernel, edges, offset_amount, cap_style)?;
+    let edges = clean(kernel, edges.into_iter());
+    let edges = clip(kernel, edges.into_iter(), |w| w > 0)?;
+    Ok(edges)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,7 +198,8 @@ mod tests {
     #[test]
     fn test_offset_square_erodes_to_nothing() {
         // Create a 2x2 square centered at origin
-        let mut kernel = Kernel::new_with_vertices(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -188,7 +215,8 @@ mod tests {
     #[test]
     fn test_offset_square_erodes_partially() {
         // Create a 4x4 square centered at origin
-        let mut kernel = Kernel::new_with_vertices(vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[-2.0, -2.0], [2.0, -2.0], [2.0, 2.0], [-2.0, 2.0]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -203,7 +231,8 @@ mod tests {
     #[test]
     fn test_offset_square_expands() {
         // Create a 2x2 square centered at origin
-        let mut kernel = Kernel::new_with_vertices(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[-1.0, -1.0], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -234,7 +263,8 @@ mod tests {
     #[test]
     fn test_offset_zero_amount() {
         // Create a simple square
-        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 2.0], [0.0, 2.0]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -249,7 +279,8 @@ mod tests {
     #[test]
     fn test_offset_restores_approximately() {
         // Create a large square
-        let mut kernel = Kernel::new_with_vertices(vec![[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[-5.0, -5.0], [5.0, -5.0], [5.0, 5.0], [-5.0, 5.0]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -268,7 +299,8 @@ mod tests {
     #[test]
     fn test_conjoined_triangles() {
         // Create a large square
-        let mut kernel = Kernel::new_with_vertices(vec![[0., 0.], [-1., -1.], [-1., -2.], [1., 2.], [-1., 1.]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[0., 0.], [-1., -1.], [-1., -2.], [1., 2.], [-1., 1.]]);
 
         let edges = vec![(0, 1), (1, 2), (2, 0), (0, 3), (3, 4), (4, 0)];
 
