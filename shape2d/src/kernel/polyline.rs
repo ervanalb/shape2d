@@ -75,7 +75,7 @@ impl<E: EpsilonProviderF32> F32<E> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum CapStyleF32 {
     Arc { tolerance: f32 },
     Bevel,
@@ -370,7 +370,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
         offset_amount: Self::OffsetAmount,
-        cap_style: &Self::CapStyle,
+        cap_style: Self::CapStyle,
         mut emit_edge: impl FnMut(Self::Edge),
     ) {
         let ix_a = incoming_edge.1;

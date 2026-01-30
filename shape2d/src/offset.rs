@@ -28,7 +28,7 @@ pub fn offset_raw<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     offset_amount: K::OffsetAmount,
-    cap_style: &K::CapStyle,
+    cap_style: K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     // Go through all the edges.
     // If the edge has endpoints, add an event for each endpoint to a list,
@@ -156,7 +156,7 @@ pub fn offset<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     offset_amount: K::OffsetAmount,
-    cap_style: &K::CapStyle,
+    cap_style: K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     let edges = offset_raw(kernel, edges, offset_amount, cap_style)?;
     let edges = clean(kernel, edges.into_iter());
@@ -168,7 +168,7 @@ pub fn offset_segments_raw<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     offset_amount: K::OffsetAmount,
-    cap_style: &K::CapStyle,
+    cap_style: K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     offset_raw(
         kernel,
@@ -182,7 +182,7 @@ pub fn offset_segments<K: Kernel>(
     kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     offset_amount: K::OffsetAmount,
-    cap_style: &K::CapStyle,
+    cap_style: K::CapStyle,
 ) -> Result<Vec<K::Edge>, OffsetError> {
     let edges = offset_segments_raw(kernel, edges, offset_amount, cap_style)?;
     let edges = clean(kernel, edges.into_iter());
@@ -206,7 +206,7 @@ mod tests {
         // Erode by -2.0 (larger than the square's half-width)
         // This should completely erode the square
         let cap_style = CapStyleF32::Bevel;
-        let result = offset(&mut kernel, edges.into_iter(), -2.0, &cap_style).unwrap();
+        let result = offset(&mut kernel, edges.into_iter(), -2.0, cap_style).unwrap();
 
         // The result should be empty (square fully eroded)
         assert!(result.is_empty(), "Square should be completely eroded");
@@ -222,7 +222,7 @@ mod tests {
 
         // Erode by -0.5
         let cap_style = CapStyleF32::Arc { tolerance: 0.01 };
-        let result = offset(&mut kernel, edges.into_iter(), -0.5, &cap_style).unwrap();
+        let result = offset(&mut kernel, edges.into_iter(), -0.5, cap_style).unwrap();
 
         // The result should be a square
         assert_eq!(result.len(), 4);
@@ -238,7 +238,7 @@ mod tests {
 
         // Expand by +0.5
         let cap_style = CapStyleF32::Bevel;
-        let result = offset(&mut kernel, edges.into_iter(), 0.5, &cap_style).unwrap();
+        let result = offset(&mut kernel, edges.into_iter(), 0.5, cap_style).unwrap();
 
         // Should have 4 edges + 4 caps
         assert_eq!(result.len(), 8,);
@@ -253,7 +253,7 @@ mod tests {
 
         // Expand by +0.5
         let cap_style = CapStyleF32::Bevel;
-        let result = offset(&mut kernel, edges.into_iter(), 0.5, &cap_style).unwrap();
+        let result = offset(&mut kernel, edges.into_iter(), 0.5, cap_style).unwrap();
 
         // The result should have 3 edges + 3 caps
         assert!(!result.is_empty(), "Expanded triangle should have edges");
@@ -270,7 +270,7 @@ mod tests {
 
         // Offset by 0 should return similar topology
         let cap_style = CapStyleF32::Bevel;
-        let result = offset(&mut kernel, edges.into_iter(), 0.0, &cap_style).unwrap();
+        let result = offset(&mut kernel, edges.into_iter(), 0.0, cap_style).unwrap();
 
         // Should have edges (though vertices may have changed)
         assert_eq!(result.len(), 4);
@@ -287,10 +287,10 @@ mod tests {
         let cap_style = CapStyleF32::Arc { tolerance: 0.01 };
 
         // Expand by +1.0
-        let expanded = offset(&mut kernel, edges.into_iter(), 1.0, &cap_style).unwrap();
+        let expanded = offset(&mut kernel, edges.into_iter(), 1.0, cap_style).unwrap();
 
         // Erode back by -1.1
-        let restored = offset(&mut kernel, expanded.into_iter(), -1.1, &cap_style).unwrap();
+        let restored = offset(&mut kernel, expanded.into_iter(), -1.1, cap_style).unwrap();
 
         // The result should have 4 edges (though not identical to original due to rounding)
         assert_eq!(restored.len(), 4);
@@ -305,7 +305,7 @@ mod tests {
         let edges = vec![(0, 1), (1, 2), (2, 0), (0, 3), (3, 4), (4, 0)];
 
         // offset_raw should not return a topology error
-        offset_raw(&mut kernel, edges.into_iter(), 0.1, &CapStyleF32::Bevel).unwrap();
+        offset_raw(&mut kernel, edges.into_iter(), 0.1, CapStyleF32::Bevel).unwrap();
     }
 
     #[test]
@@ -314,7 +314,7 @@ mod tests {
         let edges = vec![(0, 1)];
 
         let edges =
-            offset_segments_raw(&mut kernel, edges.into_iter(), 0.1, &CapStyleF32::Bevel).unwrap();
+            offset_segments_raw(&mut kernel, edges.into_iter(), 0.1, CapStyleF32::Bevel).unwrap();
 
         // Offset of a line with beveled edges should be a rectangle
         assert_eq!(edges.len(), 4);

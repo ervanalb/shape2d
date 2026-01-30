@@ -168,7 +168,7 @@ impl ProcessingResults {
         winding_rule: WindingRule,
         epsilon: f32,
         offset_amount: f32,
-        cap_style: &CapStyleF32,
+        cap_style: CapStyleF32,
     ) -> Self {
         let input_edges = input_edges.to_vec();
 
@@ -406,7 +406,7 @@ impl Demo {
             winding_rule,
             epsilon,
             offset_amount,
-            &cap_style.to_cap_style_f32(),
+            cap_style.to_cap_style_f32(),
         );
 
         let edit_geometry_text = serde_json::to_string_pretty(&serde_json::json!({
@@ -473,7 +473,7 @@ impl Demo {
             self.winding_rule,
             self.epsilon,
             self.offset_amount,
-            &self.cap_style.to_cap_style_f32(),
+            self.cap_style.to_cap_style_f32(),
         );
 
         Ok(())
@@ -643,7 +643,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                     self.winding_rule,
                     self.epsilon,
                     self.offset_amount,
-                    &self.cap_style.to_cap_style_f32(),
+                    self.cap_style.to_cap_style_f32(),
                 );
             }
 
@@ -672,7 +672,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                     self.winding_rule,
                     self.epsilon,
                     self.offset_amount,
-                    &self.cap_style.to_cap_style_f32(),
+                    self.cap_style.to_cap_style_f32(),
                 );
             }
 
@@ -691,7 +691,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                     self.winding_rule,
                     self.epsilon,
                     self.offset_amount,
-                    &self.cap_style.to_cap_style_f32(),
+                    self.cap_style.to_cap_style_f32(),
                 );
             }
 
@@ -719,7 +719,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                     self.winding_rule,
                     self.epsilon,
                     self.offset_amount,
-                    &self.cap_style.to_cap_style_f32(),
+                    self.cap_style.to_cap_style_f32(),
                 );
             }
 
@@ -838,7 +838,7 @@ It runs the input data through each of these steps sequentially, and shows you t
                                     self.winding_rule,
                                     self.epsilon,
                                     self.offset_amount,
-                                    &self.cap_style.to_cap_style_f32(),
+                                    self.cap_style.to_cap_style_f32(),
                                 );
                             }
                         } else if pointer_released {

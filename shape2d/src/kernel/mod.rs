@@ -14,7 +14,7 @@ pub trait Kernel: Sized {
     type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleKernel: TriangleKernel;
-    type CapStyle: Debug;
+    type CapStyle: Copy + Debug;
     type OffsetAmount: Copy + Debug;
 
     /// Check if two vertices are coincident (at the same location)
@@ -111,7 +111,7 @@ pub trait Kernel: Sized {
         outgoing_edge: Self::Edge,
         original_vertex: Self::Vertex,
         offset_amount: Self::OffsetAmount,
-        cap_style: &Self::CapStyle,
+        cap_style: Self::CapStyle,
         emit_edge: impl FnMut(Self::Edge),
     );
 }
