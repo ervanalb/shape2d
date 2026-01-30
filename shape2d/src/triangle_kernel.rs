@@ -57,7 +57,7 @@ impl TriangleKernelF32 {
 
 impl TriangleKernel for TriangleKernelF32 {
     type Vertex = u32;
-    type Triangle = (u32, u32, u32);
+    type Triangle = [u32; 3];
 
     fn push_triangle(
         &mut self,
@@ -65,7 +65,7 @@ impl TriangleKernel for TriangleKernelF32 {
         v1: Self::Vertex,
         v2: Self::Vertex,
     ) -> Self::Triangle {
-        (v0, v1, v2)
+        [v0, v1, v2]
     }
 
     fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering {

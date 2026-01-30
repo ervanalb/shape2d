@@ -157,7 +157,7 @@ struct ProcessingResults {
     raw_offset_edges: Vec<(u32, u32)>,
     cleaned_offset_edges: Vec<(u32, u32)>,
     clipped_offset_edges: Vec<(u32, u32)>,
-    triangles: Vec<(u32, u32, u32)>,
+    triangles: Vec<[u32; 3]>,
     error: Option<String>,
 }
 
@@ -288,7 +288,7 @@ impl ProcessingResults {
 
         self.triangles
             .iter()
-            .filter_map(|&(v0, v1, v2)| {
+            .filter_map(|&[v0, v1, v2]| {
                 let p0 = self.triangle_kernel.v(v0);
                 let p1 = self.triangle_kernel.v(v1);
                 let p2 = self.triangle_kernel.v(v2);
@@ -317,7 +317,7 @@ impl ProcessingResults {
     fn triangles_to_arrows(&self) -> Vec<([f64; 2], [f64; 2])> {
         self.triangles
             .iter()
-            .map(|&(v0, v1, v2)| {
+            .map(|&[v0, v1, v2]| {
                 let p0 = self.triangle_kernel.v(v0);
                 let p1 = self.triangle_kernel.v(v1);
                 let p2 = self.triangle_kernel.v(v2);
@@ -335,7 +335,7 @@ impl ProcessingResults {
     fn triangles_to_vertices(&self) -> Vec<[f64; 2]> {
         self.triangles
             .iter()
-            .flat_map(|&(v0, v1, v2)| {
+            .flat_map(|&[v0, v1, v2]| {
                 let p0 = self.triangle_kernel.v(v0);
                 let p1 = self.triangle_kernel.v(v1);
                 let p2 = self.triangle_kernel.v(v2);

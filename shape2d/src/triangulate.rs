@@ -948,8 +948,8 @@ mod tests {
     use crate::triangle_kernel::TriangleKernelF32;
 
     /// Helper to verify triangle winding and that all triangles reference valid vertices
-    fn verify_triangulation(triangle_kernel: &TriangleKernelF32, triangles: &[(u32, u32, u32)]) {
-        for &(i0, i1, i2) in triangles {
+    fn verify_triangulation(triangle_kernel: &TriangleKernelF32, triangles: &[[u32; 3]]) {
+        for &[i0, i1, i2] in triangles {
             let v0 = triangle_kernel.v(i0);
             let v1 = triangle_kernel.v(i1);
             let v2 = triangle_kernel.v(i2);
@@ -984,7 +984,8 @@ mod tests {
     #[test]
     fn test_simple_quad() {
         // Simple convex quad - has start, top, bottom, and end vertices
-        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
+        let mut kernel =
+            Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1682,7 +1683,7 @@ mod tests {
         assert!(
             triangles
                 .iter()
-                .filter(|&&(a, b, c)| a == v || b == v || c == v)
+                .filter(|&&[a, b, c]| a == v || b == v || c == v)
                 .count()
                 > 0
         );

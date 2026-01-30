@@ -25,7 +25,7 @@ impl EpsilonProviderF32 for f32 {
 }
 
 /// Constant epsilon provider - returns a compile-time constant
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct DefaultEpsilon;
 
 impl EpsilonProviderF32 for DefaultEpsilon {
@@ -447,24 +447,36 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 let before_pt_a = self.v(incoming_edge.0);
                 let after_pt_b = self.v(outgoing_edge.1);
 
-                // Extended edges `a` and `b` by `limit`
-                // (they may intersect, but this will be clipped away.)
+                let miter_pt = intersect_lines_f32(before_pt_a, pt_a, pt_b, after_pt_b);
+                let d_a = [miter_pt[0] - pt_a[0], miter_pt[1] - pt_a[1]];
+                let d_a_sq = d_a[0] * d_a[0] + d_a[1] * d_a[1];
+                if d_a_sq < limit * limit {
+                    // Emit a true miter
+                    let miter_v = self.push_vertex(miter_pt);
+                    emit_edge((ix_a, miter_v));
+                    emit_edge((miter_v, ix_b));
+                } else {
+                    // Emit a clipped miter
+                    // Extended edges `a` and `b` by `limit`
 
-                let a_vec = [pt_a[0] - before_pt_a[0], pt_a[1] - before_pt_a[1]];
-                let a_len = a_vec[0].hypot(a_vec[1]);
-                let a_factor = limit / a_len;
-                let extended_a_pt = [pt_a[0] + a_vec[0] * a_factor, pt_a[1] + a_vec[1] * a_factor];
-                let extended_a_vertex = self.push_vertex(extended_a_pt);
+                    let a_vec = [pt_a[0] - before_pt_a[0], pt_a[1] - before_pt_a[1]];
+                    let a_len = a_vec[0].hypot(a_vec[1]);
+                    let a_factor = limit / a_len;
+                    let extended_a_pt =
+                        [pt_a[0] + a_vec[0] * a_factor, pt_a[1] + a_vec[1] * a_factor];
+                    let extended_a_vertex = self.push_vertex(extended_a_pt);
 
-                let b_vec = [pt_b[0] - after_pt_b[0], pt_b[1] - after_pt_b[1]];
-                let b_len = b_vec[0].hypot(b_vec[1]);
-                let b_factor = limit / b_len;
-                let extended_b_pt = [pt_b[0] + b_vec[0] * b_factor, pt_b[1] + b_vec[1] * b_factor];
-                let extended_b_vertex = self.push_vertex(extended_b_pt);
+                    let b_vec = [pt_b[0] - after_pt_b[0], pt_b[1] - after_pt_b[1]];
+                    let b_len = b_vec[0].hypot(b_vec[1]);
+                    let b_factor = limit / b_len;
+                    let extended_b_pt =
+                        [pt_b[0] + b_vec[0] * b_factor, pt_b[1] + b_vec[1] * b_factor];
+                    let extended_b_vertex = self.push_vertex(extended_b_pt);
 
-                emit_edge((ix_a, extended_a_vertex));
-                emit_edge((extended_a_vertex, extended_b_vertex));
-                emit_edge((extended_b_vertex, ix_b));
+                    emit_edge((ix_a, extended_a_vertex));
+                    emit_edge((extended_a_vertex, extended_b_vertex));
+                    emit_edge((extended_b_vertex, ix_b));
+                }
             }
         }
     }
