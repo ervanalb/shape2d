@@ -507,12 +507,14 @@ pub fn clean<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::line::F32 as Kernel;
+    use crate::kernel::{Direct, line::F32 as Kernel};
 
     #[test]
     fn test_simple_two_edges() {
-        let mut kernel =
-            Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
+            ..Default::default()
+        };
 
         let edges = [(0, 1), (2, 3)];
 
@@ -522,8 +524,10 @@ mod tests {
 
     #[test]
     fn test_intersecting_edges() {
-        let mut kernel =
-            Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]],
+            ..Default::default()
+        };
 
         // Two edges that intersect
         let edges = [(0, 1), (2, 3)];
@@ -532,16 +536,19 @@ mod tests {
         // Should split into 4 edges
         assert_eq!(result.len(), 4);
         // Should create a new vertex at the intersection
-        assert_eq!(kernel.vertices.len(), 5);
+        assert_eq!(kernel.points.len(), 5);
     }
 
     #[test]
     fn test_vertex_on_edge() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [0.5, 0.0], // On the first edge
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [0.5, 0.0], // On the first edge
+            ],
+            ..Default::default()
+        };
 
         let edges = [(0, 1)];
 
@@ -552,12 +559,15 @@ mod tests {
 
     #[test]
     fn test_coincident_vertices() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0],
-            [1.0, 0.0],
-            [0.0, 0.0], // Coincident with vertex 0
-            [1.0, 1.0],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0],
+                [1.0, 0.0],
+                [0.0, 0.0], // Coincident with vertex 0
+                [1.0, 1.0],
+            ],
+            ..Default::default()
+        };
 
         let edges = [(0, 1), (2, 3)];
 
@@ -568,8 +578,10 @@ mod tests {
 
     #[test]
     fn test_square_polygon() {
-        let mut kernel =
-            Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
+            ..Default::default()
+        };
 
         let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -577,13 +589,15 @@ mod tests {
         // Square edges don't intersect, should remain 4 edges
         assert_eq!(result.len(), 4);
         // No new vertices should be created
-        assert_eq!(kernel.vertices.len(), 4);
+        assert_eq!(kernel.points.len(), 4);
     }
 
     #[test]
     fn test_t_junction() {
-        let mut kernel =
-            Kernel::new_with_vertices(vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]],
+            ..Default::default()
+        };
 
         // T-junction: horizontal edge intersected by vertical edge
         let edges = [(0, 1), (2, 3)];
@@ -592,22 +606,25 @@ mod tests {
         // Should split into 4 edges meeting at center
         assert_eq!(result.len(), 4);
         // Should create intersection vertex at (0.5, 0.5)
-        assert_eq!(kernel.vertices.len(), 5);
+        assert_eq!(kernel.points.len(), 5);
     }
 
     #[test]
     fn test_multiple_intersections() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            // Horizontal line
-            [0.0, 0.5],
-            [1.0, 0.5],
-            // Vertical line
-            [0.5, 0.0],
-            [0.5, 1.0],
-            // Diagonal line
-            [0.0, 0.0],
-            [1.0, 1.0],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                // Horizontal line
+                [0.0, 0.5],
+                [1.0, 0.5],
+                // Vertical line
+                [0.5, 0.0],
+                [0.5, 1.0],
+                // Diagonal line
+                [0.0, 0.0],
+                [1.0, 1.0],
+            ],
+            ..Default::default()
+        };
 
         let edges = [(0, 1), (2, 3), (4, 5)];
 
@@ -622,13 +639,16 @@ mod tests {
     #[test]
     fn test_complex_polygon() {
         // Star-like pattern
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.5, 0.0], // Top
-            [0.7, 0.5], // Right
-            [0.5, 1.0], // Bottom
-            [0.3, 0.5], // Left
-            [0.5, 0.5], // Center
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.5, 0.0], // Top
+                [0.7, 0.5], // Right
+                [0.5, 1.0], // Bottom
+                [0.3, 0.5], // Left
+                [0.5, 0.5], // Center
+            ],
+            ..Default::default()
+        };
 
         let edges = [
             (0, 2), // Vertical through center
@@ -642,7 +662,10 @@ mod tests {
 
     #[test]
     fn test_canceling_edges() {
-        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
+            ..Default::default()
+        };
 
         // Two edges with same endpoints but opposite directions should cancel
         let edges = [
@@ -659,11 +682,14 @@ mod tests {
 
     #[test]
     fn test_merged_vertices_remove_short_edge() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0],
-            [0.0, 0.0], // Coincident with vertex 0
-            [1.0, 0.0],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0],
+                [0.0, 0.0], // Coincident with vertex 0
+                [1.0, 0.0],
+            ],
+            ..Default::default()
+        };
 
         // Edge from vertex 0 to vertex 1 (which are coincident)
         // should disappear when vertices are merged
@@ -682,8 +708,8 @@ mod tests {
 
     #[test]
     fn test_complete_clean() {
-        let mut kernel = Kernel::new_with_vertices_and_epsilon(
-            vec![
+        let mut kernel: Kernel<_, Direct, _> = Kernel {
+            points: vec![
                 [0.0, 0.0],
                 [2.0, 0.0],
                 [2.0, 2.0],
@@ -691,8 +717,9 @@ mod tests {
                 [3.5337768, 0.99069494],
                 [3.118609, 2.8236988],
             ],
-            0.1,
-        );
+            epsilon: 0.1,
+            ..Default::default()
+        };
 
         let edges = vec![(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)];
 
@@ -704,15 +731,16 @@ mod tests {
 
     #[test]
     fn test_halting() {
-        let mut kernel = Kernel::new_with_vertices_and_epsilon(
-            vec![
+        let mut kernel: Kernel<_, Direct, _> = Kernel {
+            points: vec![
                 [0.04894346, 3.309017],
                 [1.0, 3.6618032],
                 [0.8928008, 2.950759],
                 [2.0, 3.4],
             ],
-            0.7,
-        );
+            epsilon: 0.7,
+            ..Default::default()
+        };
 
         let edges = vec![(0, 1), (1, 3), (2, 3)];
 
@@ -722,8 +750,8 @@ mod tests {
 
     #[test]
     fn test_halting2() {
-        let mut kernel = Kernel::new_with_vertices_and_epsilon(
-            vec![
+        let mut kernel: Kernel<_, Direct, _> = Kernel {
+            points: vec![
                 [1.0, 4.0],
                 [1.2351141, 3.3236067],
                 [1.9510565, 3.309017],
@@ -925,8 +953,9 @@ mod tests {
                 [1.7153368, 2.6911955],
                 [1.7038463, 2.7581575],
             ],
-            1e-5,
-        );
+            epsilon: 1e-5,
+            ..Default::default()
+        };
 
         let edges = vec![
             (19, 20),

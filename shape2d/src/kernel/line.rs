@@ -1,10 +1,10 @@
-use std::cmp::Ordering;
+use std::{borrow::Borrow, cmp::Ordering};
 
 const EPSILON_MIN_F32: f32 = 1e-5;
 const EPSILON_RATE_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{EdgeSide, Kernel, VertexEvent},
+    kernel::{Direct, Edge, EdgeSide, Kernel, PointStorage, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{TriangleKernel, TriangleKernelF32},
@@ -25,7 +25,7 @@ impl EpsilonProviderF32 for f32 {
 }
 
 /// Constant epsilon provider - returns a compile-time constant
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Default)]
 pub struct DefaultEpsilon;
 
 impl EpsilonProviderF32 for DefaultEpsilon {
@@ -35,44 +35,11 @@ impl EpsilonProviderF32 for DefaultEpsilon {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct F32<E: EpsilonProviderF32 = DefaultEpsilon> {
-    pub vertices: Vec<[f32; 2]>,
+#[derive(Debug, Clone, Default)]
+pub struct F32<P = Direct, C = Direct, E = DefaultEpsilon> {
+    pub points: P,
+    pub curves: C,
     pub epsilon: E,
-}
-
-impl<E: EpsilonProviderF32> F32<E> {
-    pub fn v(&self, i: u32) -> [f32; 2] {
-        self.vertices[i as usize]
-    }
-
-    fn push_vertex(&mut self, pt: [f32; 2]) -> u32 {
-        let i = self.vertices.len();
-        self.vertices.push(pt);
-        i as u32
-    }
-}
-
-impl F32<DefaultEpsilon> {
-    pub fn new() -> Self {
-        Self {
-            vertices: vec![],
-            epsilon: DefaultEpsilon,
-        }
-    }
-
-    pub fn new_with_vertices(vertices: Vec<[f32; 2]>) -> Self {
-        Self {
-            vertices,
-            epsilon: DefaultEpsilon,
-        }
-    }
-}
-
-impl<E: EpsilonProviderF32> F32<E> {
-    pub fn new_with_vertices_and_epsilon(vertices: Vec<[f32; 2]>, epsilon: E) -> Self {
-        Self { vertices, epsilon }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -82,13 +49,22 @@ pub enum CapStyleF32 {
     Miter { limit: f32 },
 }
 
-impl<E: EpsilonProviderF32> Kernel for F32<E> {
-    type Vertex = u32;
-    type Edge = (u32, u32);
+impl<P: PointStorage<[f32; 2]>, C, E> F32<P, C, E> {
+    pub fn v(&self, v: P::Key) -> [f32; 2] {
+        *self.points.get(v).borrow()
+    }
+}
+
+impl<P: PointStorage<[f32; 2], Key: Ord>, C, E: EpsilonProviderF32> Kernel for F32<P, C, E>
+where
+    (P::Key, P::Key): Edge,
+{
+    type Vertex = P::Key;
+    type Edge = (P::Key, P::Key);
     type Extents = ExtentsF32;
     type Point = [f32; 2];
     type SweepLineEdgePortion = ();
-    type SweepLineEventPoint = u32;
+    type SweepLineEventPoint = P::Key;
     type TriangleKernel = TriangleKernelF32;
     type CapStyle = CapStyleF32;
     type OffsetAmount = f32;
@@ -137,7 +113,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
     }
 
     fn push_vertex(&mut self, intersection: Self::Point) -> Self::Vertex {
-        self.push_vertex(intersection)
+        self.points.insert(intersection)
     }
 
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {

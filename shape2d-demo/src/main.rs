@@ -1,5 +1,6 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
+use shape2d::kernel::Direct;
 use shape2d::kernel::line::{CapStyleF32, F32 as Kernel};
 use shape2d::triangle_kernel::TriangleKernelF32 as TriangleKernel;
 use shape2d::{clean, clip, offset_raw, triangulate};
@@ -149,7 +150,7 @@ const ARC_TOLERANCE: f32 = 0.001;
 const MITER_LIMIT: f32 = 4.;
 
 struct ProcessingResults {
-    kernel: Kernel<f32>,
+    kernel: Kernel<Vec<[f32; 2]>, Direct, f32>,
     triangle_kernel: TriangleKernel,
     input_edges: Vec<(u32, u32)>,
     cleaned_edges: Vec<(u32, u32)>,
@@ -173,7 +174,11 @@ impl ProcessingResults {
         let input_edges = input_edges.to_vec();
 
         // Create kernel with vertices and epsilon
-        let mut kernel = Kernel::new_with_vertices_and_epsilon(input_vertices.to_vec(), epsilon);
+        let mut kernel: Kernel<_, Direct, _> = Kernel {
+            points: input_vertices.to_vec(),
+            epsilon,
+            ..Default::default()
+        };
 
         // Step 1: Clean the edges (remove intersections)
         let cleaned_edges = clean(&mut kernel, input_edges.iter().copied());
@@ -186,7 +191,7 @@ impl ProcessingResults {
             Err(e) => {
                 error = Some(format!("Clipping error: {:?}", e));
                 eprintln!("Clipping error! {:?}", e);
-                dbg!(&kernel.vertices);
+                dbg!(&kernel.points);
                 dbg!(&cleaned_edges);
                 Vec::new()
             }
@@ -203,7 +208,7 @@ impl ProcessingResults {
             Err(e) => {
                 error = Some(format!("Offset error: {:?}", e));
                 eprintln!("Offset error! {:?}", e);
-                dbg!(&kernel.vertices);
+                dbg!(&kernel.points);
                 dbg!(&clipped_edges);
                 Vec::new()
             }
@@ -219,7 +224,7 @@ impl ProcessingResults {
                 Err(e) => {
                     error = Some(format!("Offset clipping error: {:?}", e));
                     eprintln!("Offset clipping error! {:?}", e);
-                    dbg!(&kernel.vertices);
+                    dbg!(&kernel.points);
                     dbg!(&cleaned_offset_edges);
                     Vec::new()
                 }
@@ -235,7 +240,7 @@ impl ProcessingResults {
         .unwrap_or_else(|e| {
             error = Some(format!("Triangulation error: {:?}", e));
             eprintln!("Triangulation error! {:?}", e);
-            dbg!(&kernel.vertices);
+            dbg!(&kernel.points);
             dbg!(&cleaned_edges);
             dbg!(&clipped_edges);
             Vec::new()

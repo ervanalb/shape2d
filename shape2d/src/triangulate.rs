@@ -971,7 +971,10 @@ mod tests {
     #[test]
     fn test_simple_triangle() {
         // Simple triangle - has start, top, and end vertices
-        let mut kernel = Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 0)];
         let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -984,8 +987,10 @@ mod tests {
     #[test]
     fn test_simple_quad() {
         // Simple convex quad - has start, top, bottom, and end vertices
-        let mut kernel =
-            Kernel::new_with_vertices(vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1003,7 +1008,7 @@ mod tests {
         for sides in [3, 4, 5, 6, 7, 8, 9, 10] {
             eprintln!("Testing {}-gon", sides);
 
-            let verts = (0..sides)
+            let verts: Vec<_> = (0..sides)
                 .map(|i| {
                     let angle = (i as f32) * TAU / (sides as f32);
                     [angle.cos(), angle.sin()]
@@ -1011,7 +1016,10 @@ mod tests {
                 .collect();
             let edges = (0..sides).map(|i| (i, (i + 1) % sides));
 
-            let mut kernel = Kernel::new_with_vertices(verts);
+            let mut kernel: Kernel<_> = Kernel {
+                points: verts,
+                ..Default::default()
+            };
             let mut triangle_kernel = TriangleKernelF32::new();
 
             let triangles = triangulate(&mut kernel, &mut triangle_kernel, edges).unwrap();
@@ -1036,14 +1044,17 @@ mod tests {
         // 2 = top
         // 0 = bottom
         // 1 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [3.0, 0.0], // 0
-            [3.0, 2.0], // 1
-            [2.0, 2.0], // 2
-            [1.0, 3.0], // 3
-            [0.0, 3.0], // 4
-            [0.0, 0.0], // 5
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [3.0, 0.0], // 0
+                [3.0, 2.0], // 1
+                [2.0, 2.0], // 2
+                [1.0, 3.0], // 3
+                [0.0, 3.0], // 4
+                [0.0, 0.0], // 5
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1067,12 +1078,15 @@ mod tests {
         // 1 = split
         // 0 = end
         // 2 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [2.0, 0.0], // 0
-            [1., 1.],   // 1
-            [2.0, 2.0], // 2
-            [0.0, 1.0], // 3
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [2.0, 0.0], // 0
+                [1., 1.],   // 1
+                [2.0, 2.0], // 2
+                [0.0, 1.0], // 3
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1098,13 +1112,16 @@ mod tests {
         // 3 = top
         // 1 = end
         // 2 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [1.0, 0.0], // 0
-            [2.0, 0.0], // 1
-            [2.0, 2.0], // 2
-            [1.0, 2.0], // 3
-            [0.0, 1.0], // 4
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [1.0, 0.0], // 0
+                [2.0, 0.0], // 1
+                [2.0, 2.0], // 2
+                [1.0, 2.0], // 3
+                [0.0, 1.0], // 4
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1131,12 +1148,15 @@ mod tests {
         // 2 = start
         // 3 = merge
         // 1 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0], // 0
-            [2.0, 1.0], // 1
-            [0.0, 2.0], // 2
-            [1.0, 1.0], // 3
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0], // 0
+                [2.0, 1.0], // 1
+                [0.0, 2.0], // 2
+                [1.0, 1.0], // 3
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1162,13 +1182,16 @@ mod tests {
         // 2 = top
         // 4 = merge
         // 4 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0], // 0
-            [1.0, 0.0], // 1
-            [1.0, 2.0], // 2
-            [0.0, 2.0], // 3
-            [2.0, 1.0], // 4
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0], // 0
+                [1.0, 0.0], // 1
+                [1.0, 2.0], // 2
+                [0.0, 2.0], // 3
+                [2.0, 1.0], // 4
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1194,14 +1217,17 @@ mod tests {
         // 2 = merge
         // 1 = end
         // 3 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0], // 0
-            [3.0, 0.0], // 1
-            [2.0, 1.0], // 2
-            [3.0, 2.0], // 3
-            [0.0, 2.0], // 4
-            [1.0, 1.0], // 5
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0], // 0
+                [3.0, 0.0], // 1
+                [2.0, 1.0], // 2
+                [3.0, 2.0], // 3
+                [0.0, 2.0], // 4
+                [1.0, 1.0], // 5
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 4), (4, 5), (5, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1227,13 +1253,16 @@ mod tests {
         // 4 = split
         // 1 = end
         // 2 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 0.0], // 0
-            [2.0, 0.0], // 1
-            [2.0, 2.0], // 2
-            [0.0, 2.0], // 3
-            [1.0, 1.0], // 4
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 0.0], // 0
+                [2.0, 0.0], // 1
+                [2.0, 2.0], // 2
+                [0.0, 2.0], // 3
+                [1.0, 1.0], // 4
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 4), (4, 2), (2, 3), (3, 4), (4, 0)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1265,16 +1294,19 @@ mod tests {
         // 3 = split (helper=1)
         // 2 = end
         // 4 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 1.0], // 0
-            [3.0, 1.0], // 1
-            [5.0, 0.0], // 2
-            [4.0, 1.0], // 3
-            [5.0, 2.0], // 4
-            [2.0, 2.0], // 5
-            [3.0, 3.0], // 6
-            [1.0, 2.0], // 7
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 1.0], // 0
+                [3.0, 1.0], // 1
+                [5.0, 0.0], // 2
+                [4.0, 1.0], // 3
+                [5.0, 2.0], // 4
+                [2.0, 2.0], // 5
+                [3.0, 3.0], // 6
+                [1.0, 2.0], // 7
+            ],
+            ..Default::default()
+        };
         let edges = vec![
             (0, 1),
             (1, 2),
@@ -1315,16 +1347,19 @@ mod tests {
         // 3 = split (helper=1)
         // 2 = end
         // 4 = end
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 1.0], // 0
-            [4.0, 1.0], // 1
-            [5.0, 0.0], // 2
-            [6.0, 0.0], // 3
-            [5.0, 2.0], // 4
-            [1.0, 2.0], // 5
-            [3.0, 3.0], // 6
-            [2.0, 3.0], // 7
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 1.0], // 0
+                [4.0, 1.0], // 1
+                [5.0, 0.0], // 2
+                [6.0, 0.0], // 3
+                [5.0, 2.0], // 4
+                [1.0, 2.0], // 5
+                [3.0, 3.0], // 6
+                [2.0, 3.0], // 7
+            ],
+            ..Default::default()
+        };
         let edges = vec![
             (0, 1),
             (1, 2),
@@ -1381,7 +1416,10 @@ mod tests {
             ("down", down_comb),
         ] {
             eprintln!("Testing comb: {}", desc);
-            let mut kernel = Kernel::new_with_vertices(comb.to_vec());
+            let mut kernel: Kernel<_> = Kernel {
+                points: comb.to_vec(),
+                ..Default::default()
+            };
 
             let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -1440,7 +1478,10 @@ mod tests {
             ("down", down_comb),
         ] {
             eprintln!("Testing degenerate comb: {}", desc);
-            let mut kernel = Kernel::new_with_vertices(comb.to_vec());
+            let mut kernel: Kernel<_> = Kernel {
+                points: comb.to_vec(),
+                ..Default::default()
+            };
 
             let mut triangle_kernel = TriangleKernelF32::new();
 
@@ -1455,8 +1496,9 @@ mod tests {
     #[test]
     fn test_square_with_holes() {
         // Square with three triangular holes (not touching edges)
-        let mut kernel = Kernel::new_with_vertices(vec![
-            // Outer square (counter-clockwise)
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                // Outer square (counter-clockwise)
             [0.0, 0.0],   // 0
             [10.0, 0.0],  // 1
             [10.0, 10.0], // 2
@@ -1473,7 +1515,9 @@ mod tests {
             [6.0, 2.0], // 10
             [7.0, 4.0], // 11
             [8.0, 2.0], // 12
-        ]);
+            ],
+            ..Default::default()
+        };
 
         let edges = vec![
             // Outer square
@@ -1517,8 +1561,9 @@ mod tests {
         //
         // Outer boundary: 0-1-2-3-4-5-6-7
         // Four triangular holes connecting them
-        let mut kernel = Kernel::new_with_vertices(vec![
-            // Outer boundary
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                // Outer boundary
             [0.0, 0.0], // 0 - bottom-left corner
             [2.0, 0.0], // 1 - bottom edge midpoint
             [4.0, 0.0], // 2 - bottom-right corner
@@ -1532,7 +1577,9 @@ mod tests {
             [3.0, 1.0], // 9 - right of inner square
             [3.0, 3.0], // A - top of inner square
             [1.0, 3.0], // B - left of inner square
-        ]);
+            ],
+            ..Default::default()
+        };
 
         let edges = vec![
             // Outer perimeter (counter-clockwise)
@@ -1580,17 +1627,20 @@ mod tests {
         //    /~\
         //    0-1
 
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [1.0, 0.0], // 0
-            [3.0, 0.0], // 1
-            [4.0, 1.0], // 2
-            [4.0, 3.0], // 3
-            [3.0, 4.0], // 4
-            [1.0, 4.0], // 5
-            [0.0, 3.0], // 6
-            [0.0, 1.0], // 7
-            [2.0, 2.0], // 8
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [1.0, 0.0], // 0
+                [3.0, 0.0], // 1
+                [4.0, 1.0], // 2
+                [4.0, 3.0], // 3
+                [3.0, 4.0], // 4
+                [1.0, 4.0], // 5
+                [0.0, 3.0], // 6
+                [0.0, 1.0], // 7
+                [2.0, 2.0], // 8
+            ],
+            ..Default::default()
+        };
 
         let edges = vec![
             // Bottom triangle
@@ -1620,17 +1670,20 @@ mod tests {
     #[test]
     fn test_star_cross_2() {
         // Same as star_cross but rotated 45 degrees
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.0, 1.0],
-            [1.0, 0.0],
-            [3.0, 0.0],
-            [4.0, 1.0],
-            [4.0, 3.0],
-            [3.0, 4.0],
-            [1.0, 4.0],
-            [0.0, 3.0],
-            [2.0, 2.0],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.0, 1.0],
+                [1.0, 0.0],
+                [3.0, 0.0],
+                [4.0, 1.0],
+                [4.0, 3.0],
+                [3.0, 4.0],
+                [1.0, 4.0],
+                [0.0, 3.0],
+                [2.0, 2.0],
+            ],
+            ..Default::default()
+        };
 
         let edges = vec![
             // Bottom-left triangle
@@ -1659,14 +1712,17 @@ mod tests {
 
     #[test]
     fn test_touching_triangles() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [1.0034493, 0.002921236],
-            [2.0, 0.0],
-            [2.0, 2.0],
-            [1.9927379, 0.9950979],
-            [3.0, 1.0],
-            [3.0, 3.0],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [1.0034493, 0.002921236],
+                [2.0, 0.0],
+                [2.0, 2.0],
+                [1.9927379, 0.9950979],
+                [3.0, 1.0],
+                [3.0, 3.0],
+            ],
+            ..Default::default()
+        };
         let edges = vec![(0, 1), (1, 3), (2, 0), (3, 2), (3, 4), (4, 5), (5, 3)];
 
         let mut triangle_kernel = TriangleKernelF32::new();
@@ -1691,15 +1747,18 @@ mod tests {
 
     #[test]
     fn test_touching_triangles_2() {
-        let mut kernel = Kernel::new_with_vertices(vec![
-            [0.004632079, -0.001372324],
-            [2.0, 0.0],
-            [1.0135162, 2.9981308],
-            [-1.0050312, 0.9939545],
-            [0.22551377, 1.0972531],
-            [1.6716268, 0.9979948],
-            [0.34009355, 0.9959848],
-        ]);
+        let mut kernel: Kernel<_> = Kernel {
+            points: vec![
+                [0.004632079, -0.001372324],
+                [2.0, 0.0],
+                [1.0135162, 2.9981308],
+                [-1.0050312, 0.9939545],
+                [0.22551377, 1.0972531],
+                [1.6716268, 0.9979948],
+                [0.34009355, 0.9959848],
+            ],
+            ..Default::default()
+        };
         let edges = vec![
             (0, 1),
             (1, 5),
