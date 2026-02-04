@@ -103,17 +103,12 @@ pub trait Kernel: Sized {
     // Offset methods
     fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering;
 
-    fn offset_edge(&mut self, edge: Self::Edge, offset: Self::OffsetAmount) -> Self::Edge;
-
-    fn cap_corner(
+    fn offset_edge_loops(
         &mut self,
-        incoming_edge: Self::Edge,
-        outgoing_edge: Self::Edge,
-        original_vertex: Self::Vertex,
-        offset_amount: Self::OffsetAmount,
+        edges: &[(u32, Self::Edge)],
+        offset: Self::OffsetAmount,
         cap_style: Self::CapStyle,
-        emit_edge: impl FnMut(Self::Edge),
-    );
+    ) -> Vec<Self::Edge>;
 }
 
 pub trait Edge: Copy + Ord + Debug {
