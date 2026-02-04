@@ -128,21 +128,11 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
             return None;
         }
 
-        let pt_a0 = self.v(a.0);
-        let pt_a1 = self.v(a.1);
-        let pt_b0 = self.v(b.0);
-        let pt_b1 = self.v(b.1);
-        let fp_mag = fp_mag_pt_f32(pt_a0)
-            .max(fp_mag_pt_f32(pt_a1))
-            .max(fp_mag_pt_f32(pt_b0))
-            .max(fp_mag_pt_f32(pt_b1));
-
         Some(intersect_segments_f32(
             self.v(a.0),
             self.v(a.1),
             self.v(b.0),
             self.v(b.1),
-            self.epsilon.value(fp_mag),
         )?)
     }
 
@@ -393,12 +383,14 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 let offset_edge_start_v;
                 let prev_offset_edge_end_v;
                 if i < edge_loop.len() - 1 {
-                    // Check for annihilation, which occurs if the segment is offset beyond the
-                    // intersection point of its two corner bisectors.
-                    // This works out to an offset of L / (tan a/2 + tan b/2)
-                    // where a and b are the corner angles.
+                    // OPTIMIZATION:
+                    // Check for edge annihilation, which occurs if the segment is offset
+                    // beyond the intersection point of its two corner bisectors.
+                    // This works out to an offset limit of L / (tan(a/2) + tan(b/2))
+                    // where a and b are the corner angles and L is the segment length.
                     // This can be rewritten as L * (cos(a) + 1.) * (cos(b) + 1.) /
-                    // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a));
+                    // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a))
+                    // which can then be expressed using dot & cross products.
                     {
                         let (_, (prev_edge_start_v, _)) =
                             edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
@@ -415,25 +407,32 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                         let b_dot = l23[0] * l34[0] + l23[1] * l34[1];
                         let mut b_cross = l23[0] * l34[1] - l23[1] * l34[0];
 
+                        // Negate the angles based on the offset direction
                         if offset > 0. {
                             a_cross = -a_cross;
                             b_cross = -b_cross;
                         }
 
+                        // Both corner angles must be concave
+                        // in the direction of the offset
                         if a_cross > 0. && b_cross > 0. {
                             let len12 = l12[0].hypot(l12[1]);
                             let len23 = l23[0].hypot(l23[1]);
                             let len34 = l34[0].hypot(l34[1]);
-                            // TODO avoid these divisions
-                            let a_cos = a_dot / (len12 * len23);
-                            let a_sin = a_cross / (len12 * len23);
-                            let b_cos = b_dot / (len23 * len34);
-                            let b_sin = b_cross / (len23 * len34);
 
-                            let offset_limit = len23 * (a_cos + 1.) * (b_cos + 1.)
-                                / ((a_cos + 1.) * b_sin + (b_cos + 1.) * a_sin);
+                            // Compute sine and cosine using dot and cross product.
+                            // To avoid division, both the numerator and denominator
+                            // will have a common factor of len12 * len23 ^ 2 * len34
+                            let a_cos_plus_1 = a_dot + len12 * len23;
+                            let a_sin = a_cross;
+                            let b_cos_plus_1 = b_dot + len23 * len34;
+                            let b_sin = b_cross;
 
-                            if offset_limit > 0. && offset.abs() > offset_limit {
+                            // Rearrange the inequality to avoid division
+                            // (numerator and denominator are both always positive)
+                            if len23 * a_cos_plus_1 * b_cos_plus_1
+                                < offset.abs() * (a_cos_plus_1 * b_sin + b_cos_plus_1 * a_sin)
+                            {
                                 // Annihilate
                                 continue;
                             }
@@ -444,19 +443,14 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     (offset_edge_start_pt, offset_edge_end_pt) =
                         offset_segment(original_edge_start_pt, original_edge_end_pt, offset);
 
-                    let fp_mag = fp_mag_pt_f32(prev_offset_edge_start_pt)
-                        .max(fp_mag_pt_f32(prev_offset_edge_end_pt))
-                        .max(fp_mag_pt_f32(offset_edge_start_pt))
-                        .max(fp_mag_pt_f32(offset_edge_end_pt))
-                        .max(fp_mag_pt_f32(original_edge_start_pt));
-
-                    // Check for intersection with the previous segment
+                    // OPTIMIZATION:
+                    // Check for intersection with the previous segment,
+                    // to save the cleaning / clipping steps some work.
                     if let Some(intersection) = intersect_segments_f32(
                         prev_offset_edge_start_pt,
                         prev_offset_edge_end_pt,
                         offset_edge_start_pt,
                         offset_edge_end_pt,
-                        self.epsilon.value(fp_mag),
                     ) {
                         // Segments do intersect
                         // 1. trim them and output the previous segment
@@ -499,6 +493,8 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     (Ordering::Greater, true) | (Ordering::Less, false)
                 ) {
                     // For a concave corner, draw a line between the two segments
+                    // Given the annihilation step,
+                    // I believe this is sufficient to guarantee a correct result.
                     result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
 
                     // Update state & continue
@@ -511,6 +507,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 // Now we know the corner is convex
 
                 // If the two vertices are coincident, connect them with a bevel
+                // (simple & topology-preserving)
                 let fp_mag = fp_mag_pt_f32(prev_offset_edge_end_pt)
                     .max(fp_mag_pt_f32(offset_edge_start_pt))
                     .max(fp_mag_pt_f32(original_edge_start_pt));
@@ -730,7 +727,6 @@ fn intersect_segments_f32(
     a_end: [f32; 2],
     b_start: [f32; 2],
     b_end: [f32; 2],
-    _epsilon: f32, // XXX
 ) -> Option<[f32; 2]> {
     // Perform separating axis test
     // Note: We will also return "no intersection" for any colinear segments.
@@ -1042,7 +1038,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -1057,7 +1053,7 @@ mod tests {
         let b_start = [0.5, 0.0];
         let b_end = [0.5, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(points_coincident_f32(
             result.unwrap(),
             [0.5, 0.5],
@@ -1072,7 +1068,7 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(result.is_none());
     }
 
@@ -1083,7 +1079,7 @@ mod tests {
         let b_start = [0.6, 0.4];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         assert!(result.is_none());
     }
 
@@ -1095,7 +1091,7 @@ mod tests {
         let b_start = [0.5, 0.5];
         let b_end = [1.0, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         // Collinear segments return None (det is too small)
         assert!(result.is_none());
     }
@@ -1107,7 +1103,7 @@ mod tests {
         let b_start = [0.0, 0.0];
         let b_end = [1.0, 0.000001]; // Almost parallel
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end, EPSILON_MIN_F32);
+        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
         // Should be None because det is too small
         assert!(result.is_none());
     }
@@ -1119,7 +1115,7 @@ mod tests {
         let b0 = [2.1857483, 2.2371936];
         let b1 = [2.1862082, 2.2374542];
 
-        let intersection = intersect_segments_f32(a0, a1, b0, b1, EPSILON_MIN_F32);
+        let intersection = intersect_segments_f32(a0, a1, b0, b1);
         assert!(intersection.is_none());
     }
 
