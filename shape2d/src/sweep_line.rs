@@ -26,16 +26,16 @@ impl SweepLineEventType {
 }
 
 /// A segment in the sweep line algorithm
-pub struct SweepLineSegment<G: Kernel> {
+pub struct SweepLineSegment<K: Kernel> {
     /// The edge containing this segment
-    pub edge: G::Edge,
+    pub edge: K::Edge,
     /// The specific segment of the edge
-    pub portion: G::SweepLineEdgePortion,
+    pub portion: K::SweepLineEdgePortion,
     /// Whether this segment is the top or bottom of an enclosed area
     pub chain: SweepLineChain,
 }
 
-impl<G: Kernel> std::fmt::Debug for SweepLineSegment<G> {
+impl<K: Kernel> std::fmt::Debug for SweepLineSegment<K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SweepLineSegment")
             .field("edge", &self.edge)
@@ -45,7 +45,7 @@ impl<G: Kernel> std::fmt::Debug for SweepLineSegment<G> {
     }
 }
 
-impl<G: Kernel> Clone for SweepLineSegment<G> {
+impl<K: Kernel> Clone for SweepLineSegment<K> {
     fn clone(&self) -> Self {
         Self {
             edge: self.edge,
@@ -54,18 +54,18 @@ impl<G: Kernel> Clone for SweepLineSegment<G> {
         }
     }
 }
-impl<G: Kernel> Copy for SweepLineSegment<G> {}
+impl<K: Kernel> Copy for SweepLineSegment<K> {}
 
-impl<G: Kernel> PartialEq for SweepLineSegment<G> {
+impl<K: Kernel> PartialEq for SweepLineSegment<K> {
     fn eq(&self, other: &Self) -> bool {
         self.edge == other.edge && self.portion == other.portion && self.chain == other.chain
     }
 }
 
-impl<G: Kernel> Eq for SweepLineSegment<G> {}
+impl<K: Kernel> Eq for SweepLineSegment<K> {}
 
-impl<G: Kernel> SweepLineSegment<G> {
-    pub fn new(edge: G::Edge, portion: G::SweepLineEdgePortion, chain: SweepLineChain) -> Self {
+impl<K: Kernel> SweepLineSegment<K> {
+    pub fn new(edge: K::Edge, portion: K::SweepLineEdgePortion, chain: SweepLineChain) -> Self {
         Self {
             edge,
             portion,
@@ -76,26 +76,26 @@ impl<G: Kernel> SweepLineSegment<G> {
 
 /// An event in the sweep line algorithm
 #[derive(Debug, Clone)]
-pub struct SweepLineEvent<G: Kernel> {
+pub struct SweepLineEvent<K: Kernel> {
     /// The type of event (start or end)
     pub event_type: SweepLineEventType,
     /// The segment this event is for
-    pub segment: SweepLineSegment<G>,
+    pub segment: SweepLineSegment<K>,
 }
 
 /// An entry in the sweep-line status structure
 ///
 /// Bundles a SweepLineSegment with algorithm-specific data
 #[derive(Clone)]
-pub struct SweepLineStatusEntry<G: Kernel, T> {
+pub struct SweepLineStatusEntry<K: Kernel, T> {
     /// The sweep-line segment (edge, segment, chain)
-    pub segment: SweepLineSegment<G>,
+    pub segment: SweepLineSegment<K>,
     /// Algorithm-specific data
     pub data: T,
 }
 
-impl<G: Kernel, T> SweepLineStatusEntry<G, T> {
-    pub fn new(segment: SweepLineSegment<G>, data: T) -> Self {
+impl<K: Kernel, T> SweepLineStatusEntry<K, T> {
+    pub fn new(segment: SweepLineSegment<K>, data: T) -> Self {
         Self { segment, data }
     }
 }
@@ -114,8 +114,8 @@ impl<G: Kernel, T: std::fmt::Debug> std::fmt::Debug for SweepLineStatusEntry<G, 
 /// This wraps a Vec and provides methods for finding insertion points,
 /// finding specific entries, and finding entries below a point.
 #[derive(Clone)]
-pub struct SweepLineStatus<G: Kernel, T> {
-    entries: Vec<SweepLineStatusEntry<G, T>>,
+pub struct SweepLineStatus<K: Kernel, T> {
+    entries: Vec<SweepLineStatusEntry<K, T>>,
 }
 
 impl<G: Kernel, T: std::fmt::Debug> std::fmt::Debug for SweepLineStatus<G, T> {
@@ -139,12 +139,12 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Returns None if the segment is not found or doesn't match the target.
     pub fn remove(
         &mut self,
-        geometry: &G,
+        kernel: &G,
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
     ) -> Option<SweepLineStatusEntry<G, T>> {
         let i = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            let ord = kernel.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
 
@@ -160,11 +160,11 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Returns None if there is no segment below.
     pub fn get_below(
         &self,
-        geometry: &G,
+        kernel: &G,
         event_point: G::SweepLineEventPoint,
     ) -> Option<&SweepLineStatusEntry<G, T>> {
         let pos = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            let ord = kernel.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less | Ordering::Equal)
         });
 
@@ -181,11 +181,11 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Returns None if there is no segment below.
     pub fn get_below_mut(
         &mut self,
-        geometry: &G,
+        kernel: &G,
         event_point: G::SweepLineEventPoint,
     ) -> Option<&mut SweepLineStatusEntry<G, T>> {
         let pos = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            let ord = kernel.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less | Ordering::Equal)
         });
 
@@ -202,7 +202,7 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// Returns None if the segment is not found or doesn't match the target.
     pub fn get_below_mut_and_remove(
         &mut self,
-        geometry: &G,
+        kernel: &G,
         event_point: G::SweepLineEventPoint,
         target_segment: &SweepLineSegment<G>,
     ) -> Option<(
@@ -210,7 +210,7 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
         SweepLineStatusEntry<G, T>,
     )> {
         let i = self.entries.partition_point(|entry| {
-            let ord = geometry.sweep_line_segment_cmp(&entry.segment, event_point);
+            let ord = kernel.sweep_line_segment_cmp(&entry.segment, event_point);
             matches!(ord, Ordering::Less)
         });
 
@@ -232,12 +232,12 @@ impl<G: Kernel, T: std::fmt::Debug> SweepLineStatus<G, T> {
     /// behind any entries that are equal.
     pub fn insert(
         &mut self,
-        geometry: &G,
+        kernel: &G,
         event_point: G::SweepLineEventPoint,
         entry: SweepLineStatusEntry<G, T>,
     ) {
         let pos = self.entries.partition_point(|e| {
-            let ord = geometry.sweep_line_segment_cmp(&e.segment, event_point);
+            let ord = kernel.sweep_line_segment_cmp(&e.segment, event_point);
             matches!(ord, Ordering::Less | Ordering::Equal)
         });
         self.entries.insert(pos, entry);

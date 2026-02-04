@@ -46,7 +46,7 @@ struct StatusData {
 /// Takes clean, manifold geometry and applies a winding rule to produce output edges.
 ///
 /// # Arguments
-/// * `geometry` - The geometric context
+/// * `kernel` - The geometric context
 /// * `edges` - Iterator over edges
 /// * `winding_rule` - Function that takes a winding number and returns true if it's "inside"
 ///
@@ -54,38 +54,38 @@ struct StatusData {
 /// A list of edges wound positively around the "inside" area, or a ClippingError if
 /// invalid topology is encountered.
 pub fn clip<K: Kernel>(
-    geometry: &mut K,
+    kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
     winding_rule: impl Fn(i32) -> bool,
 ) -> Result<Vec<K::Edge>, ClippingError> {
     // Build sorted event queue
-    let events = build_event_queue(geometry, edges);
+    let events = build_event_queue(kernel, edges);
 
     // Run sweep line algorithm
-    sweep_line(geometry, events, winding_rule)
+    sweep_line(kernel, events, winding_rule)
 }
 
 /// Build the event queue from edges
 fn build_event_queue<K: Kernel>(
-    geometry: &mut K,
+    kernel: &mut K,
     edges: impl Iterator<Item = K::Edge>,
 ) -> Vec<SweepLineEvent<K>> {
     let mut events = Vec::new();
 
     for e in edges {
-        for event in geometry.sweep_line_events_for_edge(e) {
+        for event in kernel.sweep_line_events_for_edge(e) {
             events.push(event);
         }
     }
 
     // Sort events
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp(a, b));
+    events.sort_by(|a, b| kernel.sweep_line_event_cmp(a, b));
     events
 }
 
 /// Run the sweep line algorithm
 fn sweep_line<K: Kernel>(
-    geometry: &mut K,
+    kernel: &mut K,
     events: Vec<SweepLineEvent<K>>,
     winding_rule: impl Fn(i32) -> bool,
 ) -> Result<Vec<K::Edge>, ClippingError> {
@@ -96,18 +96,18 @@ fn sweep_line<K: Kernel>(
         match event.event_type {
             SweepLineEventType::End => {
                 // Find and remove the edge from status
-                let event_point = geometry.sweep_line_event_point(event);
+                let event_point = kernel.sweep_line_event_point(event);
                 status
-                    .remove(geometry, event_point, &event.segment)
+                    .remove(kernel, event_point, &event.segment)
                     .ok_or(ClippingError::Topology)?;
             }
             SweepLineEventType::Start => {
                 // Find insertion point in status
-                let event_point = geometry.sweep_line_event_point(event);
+                let event_point = kernel.sweep_line_event_point(event);
 
                 // Calculate winding number
                 let winding_below = status
-                    .get_below(geometry, event_point)
+                    .get_below(kernel, event_point)
                     .map(|entry| entry.data.winding_above)
                     .unwrap_or(0);
 
@@ -119,7 +119,7 @@ fn sweep_line<K: Kernel>(
 
                 // Insert into status
                 status.insert(
-                    geometry,
+                    kernel,
                     event_point,
                     SweepLineStatusEntry::new(event.segment, StatusData { winding_above }),
                 );

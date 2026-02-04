@@ -26,7 +26,7 @@ pub enum TriangulationError {
 /// Takes a geometry kernel, triangle kernel, and edges, and returns a triangle mesh
 ///
 /// # Arguments
-/// * `geometry` - The geometric kernel
+/// * `kernel` - The geometric kernel
 /// * `triangle_kernel` - The triangle kernel for managing vertices
 /// * `edges` - Iterator over edges that bound the region to triangulate
 ///
@@ -36,13 +36,13 @@ pub enum TriangulationError {
 /// # Errors
 /// Returns a TriangulationError if the input has invalid topology or
 /// if the triangulation algorithm encounters an unexpected state
-pub fn triangulate<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    edges: impl Iterator<Item = G::Edge>,
-) -> Result<Vec<<G::TriangleKernel as TriangleKernel>::Triangle>, TriangulationError> {
+pub fn triangulate<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    edges: impl Iterator<Item = K::Edge>,
+) -> Result<Vec<<K::TriangleKernel as TriangleKernel>::Triangle>, TriangulationError> {
     // Stage 1: Partition into monotone pieces
-    let monotone_events = partition_into_monotone(geometry, triangle_kernel, edges)?;
+    let monotone_events = partition_into_monotone(kernel, triangle_kernel, edges)?;
 
     // Stage 2: Triangulate each monotone component
     let triangles = triangulate_monotone(triangle_kernel, monotone_events)?;
@@ -92,31 +92,31 @@ impl MonotoneComponentAllocator {
 }
 
 /// Stage 1: Partition into monotone pieces
-fn partition_into_monotone<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    edges: impl Iterator<Item = G::Edge>,
-) -> Result<Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>, TriangulationError> {
+fn partition_into_monotone<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    edges: impl Iterator<Item = K::Edge>,
+) -> Result<Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>, TriangulationError> {
     let mut monotone_events = Vec::new();
     let mut status =
-        SweepLineStatus::<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>::new();
+        SweepLineStatus::<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>::new();
     let mut component_allocator = MonotoneComponentAllocator::new();
 
     // Build event queue with events that share a vertex
     let mut events = Vec::new();
     for edge in edges {
-        for event in geometry.sweep_line_events_for_edge(edge) {
+        for event in kernel.sweep_line_events_for_edge(edge) {
             events.push(event);
         }
     }
-    events.sort_by(|a, b| geometry.sweep_line_event_cmp(a, b));
+    events.sort_by(|a, b| kernel.sweep_line_event_cmp(a, b));
 
     // Iterate over events for each vertex
     for vertex_events in events
-        .chunk_by(|a, b| geometry.sweep_line_event_point(a) == geometry.sweep_line_event_point(b))
+        .chunk_by(|a, b| kernel.sweep_line_event_point(a) == kernel.sweep_line_event_point(b))
     {
-        let pt = geometry.sweep_line_event_point(&vertex_events[0]);
-        let vertex = geometry.sweep_line_event_point_to_triangle_vertex(triangle_kernel, pt);
+        let pt = kernel.sweep_line_event_point(&vertex_events[0]);
+        let vertex = kernel.sweep_line_event_point_to_triangle_vertex(triangle_kernel, pt);
 
         let end_events_count =
             vertex_events.partition_point(|a| matches!(a.event_type, SweepLineEventType::End));
@@ -153,7 +153,7 @@ fn partition_into_monotone<G: Kernel>(
                 (SweepLineChain::Bottom, SweepLineChain::Top) => {
                     // End(Bottom) + End(Top) = end vertex
                     handle_end_vertex(
-                        geometry,
+                        kernel,
                         triangle_kernel,
                         pt,
                         vertex,
@@ -166,7 +166,7 @@ fn partition_into_monotone<G: Kernel>(
                 (SweepLineChain::Top, SweepLineChain::Bottom) => {
                     // End(Top) + End(Bottom) = merge vertex
                     handle_merge_vertex(
-                        geometry,
+                        kernel,
                         triangle_kernel,
                         pt,
                         vertex,
@@ -187,7 +187,7 @@ fn partition_into_monotone<G: Kernel>(
         if let Some((e1, e2, true)) = leftover_event {
             // End(Top) + Start(Top) = top vertex
             handle_top_vertex(
-                geometry,
+                kernel,
                 triangle_kernel,
                 pt,
                 vertex,
@@ -204,7 +204,7 @@ fn partition_into_monotone<G: Kernel>(
                 (SweepLineChain::Bottom, SweepLineChain::Top) => {
                     // Start(Top) + Start(Bottom) = start vertex
                     handle_start_vertex(
-                        geometry,
+                        kernel,
                         triangle_kernel,
                         pt,
                         vertex,
@@ -218,7 +218,7 @@ fn partition_into_monotone<G: Kernel>(
                 (SweepLineChain::Top, SweepLineChain::Bottom) => {
                     // Start(Bottom) + Start(Top) = split vertex
                     handle_split_vertex(
-                        geometry,
+                        kernel,
                         triangle_kernel,
                         pt,
                         vertex,
@@ -240,7 +240,7 @@ fn partition_into_monotone<G: Kernel>(
         if let Some((e1, e2, false)) = leftover_event {
             // End(Bottom) + Start(Bottom) = bottom vertex
             handle_bottom_vertex(
-                geometry,
+                kernel,
                 triangle_kernel,
                 pt,
                 vertex,
@@ -256,15 +256,15 @@ fn partition_into_monotone<G: Kernel>(
 }
 
 /// Handle start vertex
-fn handle_start_vertex<G: Kernel>(
-    geometry: &G,
-    _triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    lower_event: &SweepLineEvent<G>,
-    _upper_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_start_vertex<K: Kernel>(
+    kernel: &K,
+    _triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    lower_event: &SweepLineEvent<K>,
+    _upper_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) {
     let component = component_allocator.allocate();
@@ -278,7 +278,7 @@ fn handle_start_vertex<G: Kernel>(
 
     // Insert lower segment into status
     status.insert(
-        geometry,
+        kernel,
         pt,
         SweepLineStatusEntry::new(
             lower_event.segment,
@@ -292,24 +292,24 @@ fn handle_start_vertex<G: Kernel>(
 }
 
 /// Handle end vertex
-fn handle_end_vertex<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    lower_event: &SweepLineEvent<G>,
-    upper_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_end_vertex<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    lower_event: &SweepLineEvent<K>,
+    upper_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status & remove lower segment, noting helper H & component index I
     let segment_below = status
-        .remove(geometry, pt, &lower_event.segment)
+        .remove(kernel, pt, &lower_event.segment)
         .ok_or(TriangulationError::Topology)?;
 
     // Output lower segment with index I, chain Bottom
     output_edge_segment(
-        geometry,
+        kernel,
         triangle_kernel,
         lower_event,
         monotone_events,
@@ -345,7 +345,7 @@ fn handle_end_vertex<G: Kernel>(
 
         // Output upper segment with index J, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             upper_event,
             monotone_events,
@@ -355,7 +355,7 @@ fn handle_end_vertex<G: Kernel>(
     } else {
         // Output upper segment with index I, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             upper_event,
             monotone_events,
@@ -368,20 +368,20 @@ fn handle_end_vertex<G: Kernel>(
 }
 
 /// Handle split vertex
-fn handle_split_vertex<G: Kernel>(
-    geometry: &G,
-    _triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    _lower_event: &SweepLineEvent<G>,
-    upper_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_split_vertex<K: Kernel>(
+    kernel: &K,
+    _triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    _lower_event: &SweepLineEvent<K>,
+    upper_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
     component_allocator: &mut MonotoneComponentAllocator,
 ) -> Result<(), TriangulationError> {
     // Search status to find segment directly below this vertex, noting its index I and helper H
     let segment_below = status
-        .get_below_mut(geometry, pt)
+        .get_below_mut(kernel, pt)
         .ok_or(TriangulationError::Topology)?;
 
     match segment_below.data.helper_type {
@@ -417,7 +417,7 @@ fn handle_split_vertex<G: Kernel>(
 
             // Insert upper segment into status with index J, helper V, helper type Bottom
             status.insert(
-                geometry,
+                kernel,
                 pt,
                 SweepLineStatusEntry::new(
                     upper_event.segment,
@@ -465,7 +465,7 @@ fn handle_split_vertex<G: Kernel>(
 
             // Insert upper segment into status with index I, helper V, helper type Bottom
             status.insert(
-                geometry,
+                kernel,
                 pt,
                 SweepLineStatusEntry::new(
                     upper_event.segment,
@@ -510,7 +510,7 @@ fn handle_split_vertex<G: Kernel>(
 
             // Insert upper segment into status with index J, helper V, helper type Bottom
             status.insert(
-                geometry,
+                kernel,
                 pt,
                 SweepLineStatusEntry::new(
                     upper_event.segment,
@@ -528,19 +528,19 @@ fn handle_split_vertex<G: Kernel>(
 }
 
 /// Handle merge vertex
-fn handle_merge_vertex<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    lower_event: &SweepLineEvent<G>,
-    upper_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_merge_vertex<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    lower_event: &SweepLineEvent<K>,
+    upper_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status & remove upper segment, noting its index I2 and helper H2
     let (segment_below, upper_segment) = status
-        .get_below_mut_and_remove(geometry, pt, &upper_event.segment)
+        .get_below_mut_and_remove(kernel, pt, &upper_event.segment)
         .ok_or(TriangulationError::Topology)?;
     let segment_below = segment_below.ok_or(TriangulationError::Topology)?;
 
@@ -561,7 +561,7 @@ fn handle_merge_vertex<G: Kernel>(
 
         // Output lower segment with index J, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             lower_event,
             monotone_events,
@@ -578,7 +578,7 @@ fn handle_merge_vertex<G: Kernel>(
     } else {
         // Output lower segment with index I, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             lower_event,
             monotone_events,
@@ -638,7 +638,7 @@ fn handle_merge_vertex<G: Kernel>(
 
     // Output upper segment with index I2, chain Bottom
     output_edge_segment(
-        geometry,
+        kernel,
         triangle_kernel,
         upper_event,
         monotone_events,
@@ -650,24 +650,24 @@ fn handle_merge_vertex<G: Kernel>(
 }
 
 /// Handle bottom vertex
-fn handle_bottom_vertex<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    left_event: &SweepLineEvent<G>,
-    right_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_bottom_vertex<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    left_event: &SweepLineEvent<K>,
+    right_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status & remove left segment, noting its index I and helper H
     let left_segment = status
-        .remove(geometry, pt, &left_event.segment)
+        .remove(kernel, pt, &left_event.segment)
         .ok_or(TriangulationError::Topology)?;
 
     // Output left segment with index I, chain Bottom
     output_edge_segment(
-        geometry,
+        kernel,
         triangle_kernel,
         left_event,
         monotone_events,
@@ -703,7 +703,7 @@ fn handle_bottom_vertex<G: Kernel>(
 
         // Insert right segment into status with index J and helper V (helper type: Bottom)
         status.insert(
-            geometry,
+            kernel,
             pt,
             SweepLineStatusEntry::new(
                 right_event.segment,
@@ -724,7 +724,7 @@ fn handle_bottom_vertex<G: Kernel>(
 
         // Insert right segment into status with index I and helper V (helper type: Bottom)
         status.insert(
-            geometry,
+            kernel,
             pt,
             SweepLineStatusEntry::new(
                 right_event.segment,
@@ -741,19 +741,19 @@ fn handle_bottom_vertex<G: Kernel>(
 }
 
 /// Handle top vertex
-fn handle_top_vertex<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    pt: G::SweepLineEventPoint,
-    vertex: <G::TriangleKernel as TriangleKernel>::Vertex,
-    left_event: &SweepLineEvent<G>,
-    _right_event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
-    status: &mut SweepLineStatus<G, StatusData<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn handle_top_vertex<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    pt: K::SweepLineEventPoint,
+    vertex: <K::TriangleKernel as TriangleKernel>::Vertex,
+    left_event: &SweepLineEvent<K>,
+    _right_event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
+    status: &mut SweepLineStatus<K, StatusData<<K::TriangleKernel as TriangleKernel>::Vertex>>,
 ) -> Result<(), TriangulationError> {
     // Search status to find segment directly below this vertex, noting its index I and helper H
     let segment_below = status
-        .get_below_mut(geometry, pt)
+        .get_below_mut(kernel, pt)
         .ok_or(TriangulationError::Topology)?;
 
     // Check if helper is a merge vertex
@@ -777,7 +777,7 @@ fn handle_top_vertex<G: Kernel>(
 
         // Output left segment with index J, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             left_event,
             monotone_events,
@@ -787,7 +787,7 @@ fn handle_top_vertex<G: Kernel>(
     } else {
         // Output left segment with index I, chain Top
         output_edge_segment(
-            geometry,
+            kernel,
             triangle_kernel,
             left_event,
             monotone_events,
@@ -813,16 +813,16 @@ fn handle_top_vertex<G: Kernel>(
 }
 
 /// Output an edge segment by discretizing it into triangle vertices
-fn output_edge_segment<G: Kernel>(
-    geometry: &G,
-    triangle_kernel: &mut G::TriangleKernel,
-    event: &SweepLineEvent<G>,
-    monotone_events: &mut Vec<MonotoneEvent<<G::TriangleKernel as TriangleKernel>::Vertex>>,
+fn output_edge_segment<K: Kernel>(
+    kernel: &K,
+    triangle_kernel: &mut K::TriangleKernel,
+    event: &SweepLineEvent<K>,
+    monotone_events: &mut Vec<MonotoneEvent<<K::TriangleKernel as TriangleKernel>::Vertex>>,
     component: u32,
     chain: SweepLineChain,
 ) {
     for vertex in
-        geometry.sweep_line_edge_segment_to_triangle_vertices(triangle_kernel, &event.segment)
+        kernel.sweep_line_edge_segment_to_triangle_vertices(triangle_kernel, &event.segment)
     {
         monotone_events.push(MonotoneEvent {
             vertex,
@@ -950,9 +950,9 @@ mod tests {
     /// Helper to verify triangle winding and that all triangles reference valid vertices
     fn verify_triangulation(triangle_kernel: &TriangleKernelF32, triangles: &[[u32; 3]]) {
         for &[i0, i1, i2] in triangles {
-            let v0 = triangle_kernel.v(i0);
-            let v1 = triangle_kernel.v(i1);
-            let v2 = triangle_kernel.v(i2);
+            let v0 = triangle_kernel.pt(i0);
+            let v1 = triangle_kernel.pt(i1);
+            let v2 = triangle_kernel.pt(i2);
 
             let cross = (v1[0] - v0[0]) * (v2[1] - v0[1]) - (v1[1] - v0[1]) * (v2[0] - v0[0]);
             assert!(
@@ -970,7 +970,7 @@ mod tests {
 
     #[test]
     fn test_simple_triangle() {
-        // Simple triangle - has start, top, and end vertices
+        // Simple triangle - has start, top, and end points
         let mut kernel: Kernel<_> = Kernel {
             points: vec![[0.0, 0.0], [2.0, 0.0], [1.0, 1.0]],
             ..Default::default()
@@ -986,7 +986,7 @@ mod tests {
 
     #[test]
     fn test_simple_quad() {
-        // Simple convex quad - has start, top, bottom, and end vertices
+        // Simple convex quad - has start, top, bottom, and end points
         let mut kernel: Kernel<_> = Kernel {
             points: vec![[0.0, 0.0], [2.0, 0.0], [2.0, 1.0], [0.0, 1.0]],
             ..Default::default()
@@ -1732,7 +1732,7 @@ mod tests {
 
         // Make sure the point 2., 2. appears in the output triangulation
         let v = triangle_kernel
-            .vertices
+            .points
             .iter()
             .position(|&v| v == [2., 2.])
             .unwrap() as u32;

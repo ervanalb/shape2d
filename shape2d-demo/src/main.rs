@@ -264,8 +264,8 @@ impl ProcessingResults {
         edges
             .iter()
             .map(|&(tail, head)| {
-                let tail_pos = self.kernel.v(tail);
-                let head_pos = self.kernel.v(head);
+                let tail_pos = self.kernel.pt(tail);
+                let head_pos = self.kernel.pt(head);
                 (
                     [tail_pos[0] as f64, tail_pos[1] as f64],
                     [head_pos[0] as f64, head_pos[1] as f64],
@@ -278,8 +278,8 @@ impl ProcessingResults {
         edges
             .iter()
             .flat_map(|&(tail, head)| {
-                let tail = self.kernel.v(tail);
-                let head = self.kernel.v(head);
+                let tail = self.kernel.pt(tail);
+                let head = self.kernel.pt(head);
                 [
                     [tail[0] as f64, tail[1] as f64],
                     [head[0] as f64, head[1] as f64],
@@ -294,9 +294,9 @@ impl ProcessingResults {
         self.triangles
             .iter()
             .filter_map(|&[v0, v1, v2]| {
-                let p0 = self.triangle_kernel.v(v0);
-                let p1 = self.triangle_kernel.v(v1);
-                let p2 = self.triangle_kernel.v(v2);
+                let p0 = self.triangle_kernel.pt(v0);
+                let p1 = self.triangle_kernel.pt(v1);
+                let p2 = self.triangle_kernel.pt(v2);
 
                 // Filter out small sliver triangles
                 let edge1_x = p1[0] - p0[0];
@@ -323,9 +323,9 @@ impl ProcessingResults {
         self.triangles
             .iter()
             .map(|&[v0, v1, v2]| {
-                let p0 = self.triangle_kernel.v(v0);
-                let p1 = self.triangle_kernel.v(v1);
-                let p2 = self.triangle_kernel.v(v2);
+                let p0 = self.triangle_kernel.pt(v0);
+                let p1 = self.triangle_kernel.pt(v1);
+                let p2 = self.triangle_kernel.pt(v2);
 
                 [
                     ([p0[0] as f64, p0[1] as f64], [p1[0] as f64, p1[1] as f64]),
@@ -341,9 +341,9 @@ impl ProcessingResults {
         self.triangles
             .iter()
             .flat_map(|&[v0, v1, v2]| {
-                let p0 = self.triangle_kernel.v(v0);
-                let p1 = self.triangle_kernel.v(v1);
-                let p2 = self.triangle_kernel.v(v2);
+                let p0 = self.triangle_kernel.pt(v0);
+                let p1 = self.triangle_kernel.pt(v1);
+                let p2 = self.triangle_kernel.pt(v2);
                 [
                     [p0[0] as f64, p0[1] as f64],
                     [p1[0] as f64, p1[1] as f64],

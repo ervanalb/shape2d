@@ -30,28 +30,26 @@ pub trait TriangleKernel {
 
 #[derive(Debug, Clone)]
 pub struct TriangleKernelF32 {
-    pub vertices: Vec<[f32; 2]>,
+    pub points: Vec<[f32; 2]>,
 }
 
 impl TriangleKernelF32 {
     pub fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-        }
+        Self { points: Vec::new() }
     }
 
     pub fn push_vertex(&mut self, data: [f32; 2]) -> u32 {
-        let index = self.vertices.len() as u32;
-        self.vertices.push(data);
+        let index = self.points.len() as u32;
+        self.points.push(data);
         index
     }
 
     pub fn vertex_count(&self) -> usize {
-        self.vertices.len()
+        self.points.len()
     }
 
-    pub fn v(&self, i: u32) -> [f32; 2] {
-        self.vertices[i as usize]
+    pub fn pt(&self, i: u32) -> [f32; 2] {
+        self.points[i as usize]
     }
 }
 
@@ -69,15 +67,15 @@ impl TriangleKernel for TriangleKernelF32 {
     }
 
     fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering {
-        let a_v = self.v(a);
-        let b_v = self.v(b);
+        let a_v = self.pt(a);
+        let b_v = self.pt(b);
         crate::kernel::line::sweep_line_cmp_f32(a_v, b_v)
     }
 
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {
-        let common_v = self.v(common);
-        let a_v = self.v(a);
-        let b_v = self.v(b);
+        let common_v = self.pt(common);
+        let a_v = self.pt(a);
+        let b_v = self.pt(b);
         crate::kernel::line::sin_cmp_f32(common_v, a_v, b_v)
     }
 }
