@@ -944,7 +944,7 @@ fn triangulate_monotone<TK: TriangleKernel>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::polyline::F32 as Kernel;
+    use crate::kernel::line::F32 as Kernel;
     use crate::triangle_kernel::TriangleKernelF32;
 
     /// Helper to verify triangle winding and that all triangles reference valid vertices

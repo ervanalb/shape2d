@@ -1,6 +1,6 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
-use shape2d::kernel::polyline::{CapStyleF32, F32 as Kernel};
+use shape2d::kernel::line::{CapStyleF32, F32 as Kernel};
 use shape2d::triangle_kernel::TriangleKernelF32 as TriangleKernel;
 use shape2d::{clean, clip, offset_raw, triangulate};
 

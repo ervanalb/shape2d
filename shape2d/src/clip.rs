@@ -179,7 +179,7 @@ fn sweep_line<K: Kernel>(
 mod tests {
     use super::*;
     use crate::clean;
-    use crate::kernel::polyline::F32 as Kernel;
+    use crate::kernel::line::F32 as Kernel;
 
     #[test]
     fn test_simple_square() {

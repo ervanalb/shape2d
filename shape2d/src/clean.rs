@@ -507,7 +507,7 @@ pub fn clean<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::polyline::F32 as Kernel;
+    use crate::kernel::line::F32 as Kernel;
 
     #[test]
     fn test_simple_two_edges() {

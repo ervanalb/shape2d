@@ -175,7 +175,7 @@ pub fn offset_segments<K: Kernel>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::kernel::polyline::{CapStyleF32, F32 as Kernel};
+    use crate::kernel::line::{CapStyleF32, F32 as Kernel};
 
     #[test]
     fn test_offset_square_erodes_to_nothing() {

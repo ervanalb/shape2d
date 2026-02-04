@@ -2,7 +2,7 @@ use crate::rtree::Rect;
 use crate::triangle_kernel::TriangleKernel;
 use std::cmp::Ordering;
 use std::fmt::Debug;
-pub mod polyline;
+pub mod line;
 
 use crate::sweep_line::{SweepLineEvent, SweepLineSegment};
 

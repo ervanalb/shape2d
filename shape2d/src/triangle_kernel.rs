@@ -71,13 +71,13 @@ impl TriangleKernel for TriangleKernelF32 {
     fn sweep_line_cmp(&self, a: Self::Vertex, b: Self::Vertex) -> Ordering {
         let a_v = self.v(a);
         let b_v = self.v(b);
-        crate::kernel::polyline::sweep_line_cmp_f32(a_v, b_v)
+        crate::kernel::line::sweep_line_cmp_f32(a_v, b_v)
     }
 
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {
         let common_v = self.v(common);
         let a_v = self.v(a);
         let b_v = self.v(b);
-        crate::kernel::polyline::sin_cmp_f32(common_v, a_v, b_v)
+        crate::kernel::line::sin_cmp_f32(common_v, a_v, b_v)
     }
 }
