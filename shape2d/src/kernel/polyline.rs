@@ -635,64 +635,6 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 prev_offset_edge_start_pt = offset_edge_start_pt;
                 prev_offset_edge_end_pt = offset_edge_end_pt;
             }
-
-            /*
-            for (_, edge) in edge_loop {
-                // Offset code:
-                let a_pt = self.v(edge.0);
-                let b_pt = self.v(edge.1);
-
-                let offset_x = b_pt[1] - a_pt[1]; // Y
-                let offset_y = a_pt[0] - b_pt[0]; // -X
-                let norm_factor = offset / offset_x.hypot(offset_y);
-                let offset_x = offset_x * norm_factor;
-                let offset_y = offset_y * norm_factor;
-
-                let new_a = self.push_vertex([a_pt[0] + offset_x, a_pt[1] + offset_y]);
-                let new_b = self.push_vertex([b_pt[0] + offset_x, b_pt[1] + offset_y]);
-
-                offset_edges.push((new_a, new_b));
-            }
-
-            for ((&incoming_edge, &outgoing_edge), &(_, original_incoming_edge)) in offset_edges
-                .iter()
-                .zip(offset_edges[1..].iter().chain(offset_edges[0..1].iter()))
-                .zip(edge_loop.iter())
-            {
-                // Cap corner:
-                let ix_a = incoming_edge.1;
-                let ix_b = outgoing_edge.0;
-                let pt_a = self.v(ix_a);
-                let pt_b = self.v(ix_b);
-                let original_pt = self.v(original_incoming_edge.1);
-
-                let fp_mag = fp_mag_pt_f32(pt_a)
-                    .max(fp_mag_pt_f32(pt_b))
-                    .max(fp_mag_pt_f32(original_pt));
-
-                // For an interior corner, draw lines to the original vertex
-                // as per https://mcmains.me.berkeley.edu/pubs/DAC05OffsetPolygon.pdf
-                if matches!(
-                    (sin_cmp_f32(original_pt, pt_a, pt_b), offset >= 0.),
-                    (Ordering::Greater, true) | (Ordering::Less, false)
-                ) {
-                    corner_caps.push((ix_a, ix_b)); // XXX
-                    //emit_edge((ix_a, original_vertex));
-                    //emit_edge((original_vertex, ix_b));
-                    continue;
-                }
-
-                // If the two vertices are coincident, connect them with a bevel
-                if points_coincident_f32(pt_a, pt_b, self.epsilon.value(fp_mag)) {
-                    corner_caps.push((ix_a, ix_b));
-                    continue;
-                }
-
-                }
-            }
-            result_edges.extend(offset_edges.drain(..));
-            result_edges.extend(corner_caps.drain(..));
-            */
         }
         result_edges
     }
