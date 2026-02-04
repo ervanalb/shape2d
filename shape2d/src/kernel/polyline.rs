@@ -393,7 +393,52 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                 let offset_edge_start_v;
                 let prev_offset_edge_end_v;
                 if i < edge_loop.len() - 1 {
-                    // TODO: Check for annhiliation
+                    // Check for annihilation, which occurs if the segment is offset beyond the
+                    // intersection point of its two corner bisectors.
+                    // This works out to an offset of L / (tan a/2 + tan b/2)
+                    // where a and b are the corner angles.
+                    // This can be rewritten as L * (cos(a) + 1.) * (cos(b) + 1.) /
+                    // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a));
+                    {
+                        let (_, (prev_edge_start_v, _)) =
+                            edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
+                        let (_, (_, next_edge_end_v)) = edge_loop[(i + 1) % edge_loop.len()];
+                        let pt1 = self.v(prev_edge_start_v);
+                        let pt2 = original_edge_start_pt;
+                        let pt3 = original_edge_end_pt;
+                        let pt4 = self.v(next_edge_end_v);
+                        let l12 = [pt2[0] - pt1[0], pt2[1] - pt1[1]];
+                        let l23 = [pt3[0] - pt2[0], pt3[1] - pt2[1]];
+                        let l34 = [pt4[0] - pt3[0], pt4[1] - pt3[1]];
+                        let a_dot = l12[0] * l23[0] + l12[1] * l23[1];
+                        let mut a_cross = l12[0] * l23[1] - l12[1] * l23[0];
+                        let b_dot = l23[0] * l34[0] + l23[1] * l34[1];
+                        let mut b_cross = l23[0] * l34[1] - l23[1] * l34[0];
+
+                        if offset > 0. {
+                            a_cross = -a_cross;
+                            b_cross = -b_cross;
+                        }
+
+                        if a_cross > 0. && b_cross > 0. {
+                            let len12 = l12[0].hypot(l12[1]);
+                            let len23 = l23[0].hypot(l23[1]);
+                            let len34 = l34[0].hypot(l34[1]);
+                            // TODO avoid these divisions
+                            let a_cos = a_dot / (len12 * len23);
+                            let a_sin = a_cross / (len12 * len23);
+                            let b_cos = b_dot / (len23 * len34);
+                            let b_sin = b_cross / (len23 * len34);
+
+                            let offset_limit = len23 * (a_cos + 1.) * (b_cos + 1.)
+                                / ((a_cos + 1.) * b_sin + (b_cos + 1.) * a_sin);
+
+                            if offset_limit > 0. && offset.abs() > offset_limit {
+                                // Annihilate
+                                continue;
+                            }
+                        }
+                    }
 
                     // Offset the edge
                     (offset_edge_start_pt, offset_edge_end_pt) =
@@ -454,9 +499,7 @@ impl<E: EpsilonProviderF32> Kernel for F32<E> {
                     (Ordering::Greater, true) | (Ordering::Less, false)
                 ) {
                     // For a concave corner, draw a line between the two segments
-                    result_edges.push((prev_offset_edge_end_v, offset_edge_start_v)); // XXX
-                    //emit_edge((ix_a, original_vertex));
-                    //emit_edge((original_vertex, ix_b));
+                    result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
 
                     // Update state & continue
                     prev_offset_edge_start_v = offset_edge_start_v;
