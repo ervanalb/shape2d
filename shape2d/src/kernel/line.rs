@@ -575,6 +575,88 @@ where
     }
 }
 
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+pub struct BitOrdPointF32(pub [f32; 2]);
+
+impl PartialEq for BitOrdPointF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0[0].to_bits() == other.0[0].to_bits() && self.0[1].to_bits() == other.0[1].to_bits()
+    }
+}
+
+impl Eq for BitOrdPointF32 {}
+
+impl PartialOrd for BitOrdPointF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for BitOrdPointF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0[0]
+            .to_bits()
+            .cmp(&other.0[0].to_bits())
+            .then_with(|| self.0[1].to_bits().cmp(&other.0[1].to_bits()))
+    }
+}
+
+pub struct DirectKernelF32 {}
+
+impl KernelF32 for DirectKernelF32 {
+    type Vertex = BitOrdPointF32;
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        v.0
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        BitOrdPointF32(pt)
+    }
+}
+
+pub struct BasicKernelF32 {
+    pub points: Vec<[f32; 2]>,
+}
+
+impl KernelF32 for BasicKernelF32 {
+    type Vertex = u32;
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        self.points[v as usize]
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
+pub struct BasicKernelF32WithCustomEpsilon {
+    pub points: Vec<[f32; 2]>,
+    pub epsilon: f32,
+}
+
+impl KernelF32 for BasicKernelF32WithCustomEpsilon {
+    type Vertex = u32;
+
+    fn epsilon(&self, fp_mag: f32) -> f32 {
+        self.epsilon.max(EPSILON_RATE_F32 * fp_mag)
+    }
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        self.points[v as usize]
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
 #[derive(Debug, Default, Clone, Copy)]
 pub struct ExtentsF32 {
     scale: [f32; 2],
@@ -1297,87 +1379,5 @@ mod tests {
 
         let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
-    }
-}
-
-#[repr(transparent)]
-#[derive(Clone, Copy, Debug)]
-pub struct DirectVertexF32(pub [f32; 2]);
-
-impl PartialEq for DirectVertexF32 {
-    fn eq(&self, other: &Self) -> bool {
-        self.0[0].to_bits() == other.0[0].to_bits() && self.0[1].to_bits() == other.0[1].to_bits()
-    }
-}
-
-impl Eq for DirectVertexF32 {}
-
-impl PartialOrd for DirectVertexF32 {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for DirectVertexF32 {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.0[0]
-            .to_bits()
-            .cmp(&other.0[0].to_bits())
-            .then_with(|| self.0[1].to_bits().cmp(&other.0[1].to_bits()))
-    }
-}
-
-pub struct DirectKernelF32 {}
-
-impl KernelF32 for DirectKernelF32 {
-    type Vertex = DirectVertexF32;
-
-    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
-        v.0
-    }
-
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        DirectVertexF32(pt)
-    }
-}
-
-pub struct BasicKernelF32 {
-    pub points: Vec<[f32; 2]>,
-}
-
-impl KernelF32 for BasicKernelF32 {
-    type Vertex = u32;
-
-    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
-        self.points[v as usize]
-    }
-
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        let i = self.points.len() as u32;
-        self.points.push(pt);
-        i
-    }
-}
-
-pub struct BasicKernelF32WithCustomEpsilon {
-    pub points: Vec<[f32; 2]>,
-    pub epsilon: f32,
-}
-
-impl KernelF32 for BasicKernelF32WithCustomEpsilon {
-    type Vertex = u32;
-
-    fn epsilon(&self, fp_mag: f32) -> f32 {
-        self.epsilon.max(EPSILON_RATE_F32 * fp_mag)
-    }
-
-    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
-        self.points[v as usize]
-    }
-
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        let i = self.points.len() as u32;
-        self.points.push(pt);
-        i
     }
 }
