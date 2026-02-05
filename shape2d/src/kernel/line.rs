@@ -1300,6 +1300,47 @@ mod tests {
     }
 }
 
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+pub struct DirectVertexF32(pub [f32; 2]);
+
+impl PartialEq for DirectVertexF32 {
+    fn eq(&self, other: &Self) -> bool {
+        self.0[0].to_bits() == other.0[0].to_bits() && self.0[1].to_bits() == other.0[1].to_bits()
+    }
+}
+
+impl Eq for DirectVertexF32 {}
+
+impl PartialOrd for DirectVertexF32 {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for DirectVertexF32 {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.0[0]
+            .to_bits()
+            .cmp(&other.0[0].to_bits())
+            .then_with(|| self.0[1].to_bits().cmp(&other.0[1].to_bits()))
+    }
+}
+
+pub struct DirectKernelF32 {}
+
+impl KernelF32 for DirectKernelF32 {
+    type Vertex = DirectVertexF32;
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        v.0
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        DirectVertexF32(pt)
+    }
+}
+
 pub struct BasicKernelF32 {
     pub points: Vec<[f32; 2]>,
 }
