@@ -506,14 +506,14 @@ pub fn clean<K: Kernel>(kernel: &mut K, edges: impl Iterator<Item = K::Edge>) ->
 
 #[cfg(test)]
 mod tests {
+    use crate::kernel::line::{BasicKernelF32, BasicKernelF32WithCustomEpsilon};
+
     use super::*;
-    use crate::kernel::{Direct, line::F32 as Kernel};
 
     #[test]
     fn test_simple_two_edges() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]],
-            ..Default::default()
         };
 
         let edges = [(0, 1), (2, 3)];
@@ -524,9 +524,8 @@ mod tests {
 
     #[test]
     fn test_intersecting_edges() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 1.0], [0.0, 1.0], [1.0, 0.0]],
-            ..Default::default()
         };
 
         // Two edges that intersect
@@ -541,13 +540,12 @@ mod tests {
 
     #[test]
     fn test_vertex_on_edge() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 [0.0, 0.0],
                 [1.0, 0.0],
                 [0.5, 0.0], // On the first edge
             ],
-            ..Default::default()
         };
 
         let edges = [(0, 1)];
@@ -559,14 +557,13 @@ mod tests {
 
     #[test]
     fn test_coincident_vertices() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 [0.0, 0.0],
                 [1.0, 0.0],
                 [0.0, 0.0], // Coincident with vertex 0
                 [1.0, 1.0],
             ],
-            ..Default::default()
         };
 
         let edges = [(0, 1), (2, 3)];
@@ -578,9 +575,8 @@ mod tests {
 
     #[test]
     fn test_square_polygon() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            ..Default::default()
         };
 
         let edges = [(0, 1), (1, 2), (2, 3), (3, 0)];
@@ -594,9 +590,8 @@ mod tests {
 
     #[test]
     fn test_t_junction() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.5], [1.0, 0.5], [0.5, 0.0], [0.5, 1.0]],
-            ..Default::default()
         };
 
         // T-junction: horizontal edge intersected by vertical edge
@@ -611,7 +606,7 @@ mod tests {
 
     #[test]
     fn test_multiple_intersections() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 // Horizontal line
                 [0.0, 0.5],
@@ -623,7 +618,6 @@ mod tests {
                 [0.0, 0.0],
                 [1.0, 1.0],
             ],
-            ..Default::default()
         };
 
         let edges = [(0, 1), (2, 3), (4, 5)];
@@ -639,7 +633,7 @@ mod tests {
     #[test]
     fn test_complex_polygon() {
         // Star-like pattern
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 [0.5, 0.0], // Top
                 [0.7, 0.5], // Right
@@ -647,7 +641,6 @@ mod tests {
                 [0.3, 0.5], // Left
                 [0.5, 0.5], // Center
             ],
-            ..Default::default()
         };
 
         let edges = [
@@ -662,9 +655,8 @@ mod tests {
 
     #[test]
     fn test_canceling_edges() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0]],
-            ..Default::default()
         };
 
         // Two edges with same endpoints but opposite directions should cancel
@@ -682,13 +674,12 @@ mod tests {
 
     #[test]
     fn test_merged_vertices_remove_short_edge() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 [0.0, 0.0],
                 [0.0, 0.0], // Coincident with vertex 0
                 [1.0, 0.0],
             ],
-            ..Default::default()
         };
 
         // Edge from vertex 0 to vertex 1 (which are coincident)
@@ -708,7 +699,7 @@ mod tests {
 
     #[test]
     fn test_complete_clean() {
-        let mut kernel: Kernel<_, Direct, _> = Kernel {
+        let mut kernel = BasicKernelF32WithCustomEpsilon {
             points: vec![
                 [0.0, 0.0],
                 [2.0, 0.0],
@@ -718,7 +709,6 @@ mod tests {
                 [3.118609, 2.8236988],
             ],
             epsilon: 0.1,
-            ..Default::default()
         };
 
         let edges = vec![(0, 1), (1, 2), (2, 0), (3, 4), (4, 5), (5, 3)];
@@ -731,7 +721,7 @@ mod tests {
 
     #[test]
     fn test_halting() {
-        let mut kernel: Kernel<_, Direct, _> = Kernel {
+        let mut kernel = BasicKernelF32WithCustomEpsilon {
             points: vec![
                 [0.04894346, 3.309017],
                 [1.0, 3.6618032],
@@ -739,7 +729,6 @@ mod tests {
                 [2.0, 3.4],
             ],
             epsilon: 0.7,
-            ..Default::default()
         };
 
         let edges = vec![(0, 1), (1, 3), (2, 3)];
@@ -750,7 +739,7 @@ mod tests {
 
     #[test]
     fn test_halting2() {
-        let mut kernel: Kernel<_, Direct, _> = Kernel {
+        let mut kernel = BasicKernelF32WithCustomEpsilon {
             points: vec![
                 [1.0, 4.0],
                 [1.2351141, 3.3236067],
@@ -954,7 +943,6 @@ mod tests {
                 [1.7038463, 2.7581575],
             ],
             epsilon: 1e-5,
-            ..Default::default()
         };
 
         let edges = vec![

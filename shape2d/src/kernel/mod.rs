@@ -1,7 +1,7 @@
 use crate::rtree::Rect;
 use crate::triangle_kernel::TriangleKernel;
+use std::cmp::Ordering;
 use std::fmt::Debug;
-use std::{borrow::Borrow, cmp::Ordering};
 pub mod line;
 
 use crate::sweep_line::{SweepLineEvent, SweepLineSegment};
@@ -161,70 +161,5 @@ impl Edge for (u32, u32) {
 
     fn reversed(self) -> Self {
         (self.1, self.0)
-    }
-}
-
-pub trait PointStorage<Point> {
-    type Key: Copy + std::fmt::Debug;
-    type GetValue<'a>: Borrow<Point>
-    where
-        Self: 'a;
-
-    fn insert(&mut self, value: Point) -> Self::Key;
-    fn get<'a>(&'a self, key: Self::Key) -> Self::GetValue<'a>;
-}
-
-pub trait CurveStorage<Curve> {
-    type Key;
-    type GetValue: Borrow<Curve>;
-
-    fn insert(&mut self, value: Curve) -> Self::Key;
-    fn get(&self, key: Self::Key) -> Self::GetValue;
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct Direct;
-
-impl<T: Copy + std::fmt::Debug> PointStorage<T> for Direct {
-    type Key = T;
-    type GetValue<'a> = T;
-
-    fn insert(&mut self, value: T) -> Self::Key {
-        value
-    }
-
-    fn get(&self, key: T) -> Self::GetValue<'_> {
-        key
-    }
-}
-
-impl<T: Copy> CurveStorage<T> for Direct {
-    type Key = T;
-    type GetValue = T;
-
-    fn insert(&mut self, value: T) -> Self::Key {
-        value
-    }
-
-    fn get(&self, key: T) -> Self::GetValue {
-        key
-    }
-}
-
-impl<T: Copy> PointStorage<T> for Vec<T> {
-    type Key = u32;
-    type GetValue<'a>
-        = &'a T
-    where
-        Self: 'a;
-
-    fn insert(&mut self, value: T) -> Self::Key {
-        let i = self.len() as u32;
-        self.push(value);
-        i
-    }
-
-    fn get(&self, key: Self::Key) -> Self::GetValue<'_> {
-        &self[key as usize]
     }
 }

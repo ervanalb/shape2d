@@ -179,14 +179,13 @@ fn sweep_line<K: Kernel>(
 mod tests {
     use super::*;
     use crate::clean;
-    use crate::kernel::line::F32 as Kernel;
+    use crate::kernel::line::BasicKernelF32;
 
     #[test]
     fn test_simple_square() {
         // Simple square
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            ..Default::default()
         };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -200,9 +199,8 @@ mod tests {
     #[test]
     fn test_empty_input() {
         // No edges
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0]],
-            ..Default::default()
         };
         let edges: Vec<(u32, u32)> = vec![];
 
@@ -213,7 +211,7 @@ mod tests {
     #[test]
     fn test_overlapping_squares() {
         // Two overlapping squares that should be merged
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 // First square
                 [0.0, 0.0],
@@ -226,7 +224,6 @@ mod tests {
                 [1.5, 1.5],
                 [0.5, 1.5],
             ],
-            ..Default::default()
         };
 
         let edges = vec![
@@ -256,7 +253,7 @@ mod tests {
     #[test]
     fn test_square_with_hole() {
         // Outer square and inner square (hole)
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 // Outer square
                 [0.0, 0.0],
@@ -269,7 +266,6 @@ mod tests {
                 [1.5, 1.5],
                 [1.5, 0.5],
             ],
-            ..Default::default()
         };
 
         let edges = vec![
@@ -297,9 +293,8 @@ mod tests {
     #[test]
     fn test_empty_output() {
         // Square with winding number that will be filtered out
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]],
-            ..Default::default()
         };
         let edges = vec![(0, 1), (1, 2), (2, 3), (3, 0)];
 
@@ -310,7 +305,7 @@ mod tests {
 
     #[test]
     fn test_multiplicity() {
-        let mut kernel: Kernel<_> = Kernel {
+        let mut kernel = BasicKernelF32 {
             points: vec![
                 [-0.28425846, -0.37691897],
                 [2.0, 0.0],
@@ -323,7 +318,6 @@ mod tests {
                 [0.5973753, 0.540478],
                 [0.14415829, 0.068876386],
             ],
-            ..Default::default()
         };
         let edges = vec![
             (0, 1),

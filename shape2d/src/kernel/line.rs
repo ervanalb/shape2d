@@ -1,45 +1,23 @@
-use std::{borrow::Borrow, cmp::Ordering};
+use std::cmp::Ordering;
 
 const EPSILON_MIN_F32: f32 = 1e-5;
 const EPSILON_RATE_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{Direct, Edge, EdgeSide, Kernel, PointStorage, VertexEvent},
+    kernel::{Edge, EdgeSide, Kernel, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{TriangleKernel, TriangleKernelF32},
 };
 
-/// Trait for providing epsilon values to the F32 kernel
-pub trait EpsilonProviderF32 {
-    /// Returns the epsilon value to use for geometric comparisons
-    fn value(&self, fp_mag: f32) -> f32;
-}
+pub trait KernelF32 {
+    type Vertex: Copy + std::fmt::Debug + Ord;
 
-/// Implementation for f32
-impl EpsilonProviderF32 for f32 {
-    #[inline]
-    fn value(&self, fp_mag: f32) -> f32 {
-        self.max(EPSILON_RATE_F32 * fp_mag)
-    }
-}
-
-/// Constant epsilon provider - returns a compile-time constant
-#[derive(Debug, Clone, Default)]
-pub struct DefaultEpsilon;
-
-impl EpsilonProviderF32 for DefaultEpsilon {
-    #[inline]
-    fn value(&self, fp_mag: f32) -> f32 {
+    fn epsilon(&self, fp_mag: f32) -> f32 {
         EPSILON_MIN_F32.max(EPSILON_RATE_F32 * fp_mag)
     }
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct F32<P = Direct, C = Direct, E = DefaultEpsilon> {
-    pub points: P,
-    pub curves: C,
-    pub epsilon: E,
+    fn pt(&self, v: Self::Vertex) -> [f32; 2];
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -49,22 +27,16 @@ pub enum CapStyleF32 {
     Miter { limit: f32 },
 }
 
-impl<P: PointStorage<[f32; 2]>, C, E> F32<P, C, E> {
-    pub fn pt(&self, v: P::Key) -> [f32; 2] {
-        *self.points.get(v).borrow()
-    }
-}
-
-impl<P: PointStorage<[f32; 2], Key: Ord>, C, E: EpsilonProviderF32> Kernel for F32<P, C, E>
+impl<K: KernelF32> Kernel for K
 where
-    (P::Key, P::Key): Edge,
+    (K::Vertex, K::Vertex): Edge,
 {
-    type Vertex = P::Key;
-    type Edge = (P::Key, P::Key);
+    type Vertex = K::Vertex;
+    type Edge = (K::Vertex, K::Vertex);
     type Extents = ExtentsF32;
     type Point = [f32; 2];
     type SweepLineEdgePortion = ();
-    type SweepLineEventPoint = P::Key;
+    type SweepLineEventPoint = K::Vertex; // TODO rename this or see if it should be Point instead
     type TriangleKernel = TriangleKernelF32;
     type CapStyle = CapStyleF32;
     type OffsetAmount = f32;
@@ -73,7 +45,7 @@ where
         let pt_a = self.pt(a);
         let pt_b = self.pt(b);
         let fp_mag = fp_mag_pt_f32(pt_a).max(fp_mag_pt_f32(pt_b));
-        points_coincident_f32(self.pt(a), self.pt(b), self.epsilon.value(fp_mag))
+        points_coincident_f32(self.pt(a), self.pt(b), self.epsilon(fp_mag))
     }
 
     fn edges_coincident(&self, _a: Self::Edge, _b: Self::Edge) -> bool {
@@ -90,12 +62,7 @@ where
             .max(fp_mag_pt_f32(edge_start_pt))
             .max(fp_mag_pt_f32(edge_end_pt));
 
-        point_on_segment_f32(
-            vertex_pt,
-            edge_start_pt,
-            edge_end_pt,
-            self.epsilon.value(fp_mag),
-        )
+        point_on_segment_f32(vertex_pt, edge_start_pt, edge_end_pt, self.epsilon(fp_mag))
     }
 
     fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point> {
@@ -112,12 +79,13 @@ where
         )?)
     }
 
+    // TODO: Can this be removed or made more specific?
     fn push_vertex(&mut self, intersection: Self::Point) -> Self::Vertex {
-        self.points.insert(intersection)
+        self.new_vertex(intersection)
     }
 
     fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {
-        self.push_vertex(merge_points_f32(self.pt(a), self.pt(b)))
+        self.new_vertex(merge_points_f32(self.pt(a), self.pt(b)))
     }
 
     fn merged_edges(&mut self, _a: Self::Edge, _b: Self::Edge) -> (Self::Edge, Self::Edge) {
@@ -127,7 +95,7 @@ where
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
         extents_f32(
             edges.flat_map(|(a, b)| [self.pt(a), self.pt(b)]),
-            &self.epsilon,
+            |fp_mag| self.epsilon(fp_mag),
         )
     }
 
@@ -135,12 +103,7 @@ where
         let edge_start_pt = self.pt(edge.0);
         let edge_end_pt = self.pt(edge.1);
         let fp_mag = fp_mag_pt_f32(edge_start_pt).max(fp_mag_pt_f32(edge_end_pt));
-        segment_bbox_f32(
-            edge_start_pt,
-            edge_end_pt,
-            *extents,
-            self.epsilon.value(fp_mag),
-        )
+        segment_bbox_f32(edge_start_pt, edge_end_pt, *extents, self.epsilon(fp_mag))
     }
 
     fn sin_cmp(&self, common: Self::Vertex, a: Self::Vertex, b: Self::Vertex) -> Ordering {
@@ -344,7 +307,7 @@ where
                 first_original_edge_end_pt,
                 offset,
             );
-            let first_offset_edge_start_v = self.push_vertex(first_offset_edge_start_pt);
+            let first_offset_edge_start_v = self.new_vertex(first_offset_edge_start_pt);
 
             let mut prev_offset_edge_start_v = first_offset_edge_start_v;
             let mut prev_offset_edge_start_pt = first_offset_edge_start_pt;
@@ -430,7 +393,7 @@ where
                     ) {
                         // Segments do intersect
                         // 1. trim them and output the previous segment
-                        let intersection_v = self.push_vertex(intersection);
+                        let intersection_v = self.new_vertex(intersection);
                         result_edges.push((prev_offset_edge_start_v, intersection_v));
                         // 2. update the state & continue
                         prev_offset_edge_start_v = intersection_v;
@@ -441,14 +404,14 @@ where
 
                     // Now we know the offset segments don't intersect
                     // 1. output the full previous segment
-                    prev_offset_edge_end_v = self.push_vertex(prev_offset_edge_end_pt);
+                    prev_offset_edge_end_v = self.new_vertex(prev_offset_edge_end_pt);
                     result_edges.push((prev_offset_edge_start_v, prev_offset_edge_end_v));
 
                     // 2. lock in this segment's start point
-                    offset_edge_start_v = self.push_vertex(offset_edge_start_pt);
+                    offset_edge_start_v = self.new_vertex(offset_edge_start_pt);
                 } else {
                     // For joining back to the start, we will always output the full previous segment
-                    prev_offset_edge_end_v = self.push_vertex(prev_offset_edge_end_pt);
+                    prev_offset_edge_end_v = self.new_vertex(prev_offset_edge_end_pt);
                     result_edges.push((prev_offset_edge_start_v, prev_offset_edge_end_v));
 
                     offset_edge_start_v = first_offset_edge_start_v;
@@ -491,7 +454,7 @@ where
                 if points_coincident_f32(
                     prev_offset_edge_end_pt,
                     offset_edge_start_pt,
-                    self.epsilon.value(fp_mag),
+                    self.epsilon(fp_mag),
                 ) {
                     result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
 
@@ -521,9 +484,8 @@ where
                         // Calculate maximum angle per segment based on tolerance
                         // The sagitta (deviation) of a chord from an arc is: s = r * (1 - cos(θ/2))
                         // Solving for θ when s = tolerance: θ = 2 * arccos(1 - tolerance/r)
-                        let cos_arg = (1.0
-                            - tolerance.max(self.epsilon.value(fp_mag)) / offset.abs())
-                        .clamp(-1.0, 1.0);
+                        let cos_arg = (1.0 - tolerance.max(self.epsilon(fp_mag)) / offset.abs())
+                            .clamp(-1.0, 1.0);
                         let max_angle_per_segment = 2.0 * cos_arg.acos();
                         let num_segments =
                             (delta_angle.abs() / max_angle_per_segment).ceil().max(1.) as u32;
@@ -538,7 +500,7 @@ where
                             // Rotate [dx_a, dy_a] by theta
                             let dx = c * dx_a - s * dy_a;
                             let dy = s * dx_a + c * dy_a;
-                            let v = self.push_vertex([
+                            let v = self.new_vertex([
                                 original_edge_start_pt[0] + dx,
                                 original_edge_start_pt[1] + dy,
                             ]);
@@ -566,7 +528,7 @@ where
                         let d_a_sq = d_a[0] * d_a[0] + d_a[1] * d_a[1];
                         if d_a_sq < limit * limit {
                             // Emit a true miter
-                            let miter_v = self.push_vertex(miter_pt);
+                            let miter_v = self.new_vertex(miter_pt);
                             result_edges.push((prev_offset_edge_end_v, miter_v));
                             result_edges.push((miter_v, offset_edge_start_v));
                         } else {
@@ -583,7 +545,7 @@ where
                                 prev_offset_edge_end_pt[0] + a_vec[0] * a_factor,
                                 prev_offset_edge_end_pt[1] + a_vec[1] * a_factor,
                             ];
-                            let extended_a_vertex = self.push_vertex(extended_a_pt);
+                            let extended_a_vertex = self.new_vertex(extended_a_pt);
 
                             let b_vec = [
                                 offset_edge_start_pt[0] - offset_edge_end_pt[0],
@@ -595,7 +557,7 @@ where
                                 offset_edge_start_pt[0] + b_vec[0] * b_factor,
                                 offset_edge_start_pt[1] + b_vec[1] * b_factor,
                             ];
-                            let extended_b_vertex = self.push_vertex(extended_b_pt);
+                            let extended_b_vertex = self.new_vertex(extended_b_pt);
 
                             result_edges.push((prev_offset_edge_end_v, extended_a_vertex));
                             result_edges.push((extended_a_vertex, extended_b_vertex));
@@ -740,9 +702,9 @@ fn merge_points_f32(a: [f32; 2], b: [f32; 2]) -> [f32; 2] {
     [0.5 * (a[0] + b[0]), 0.5 * (a[1] + b[1])]
 }
 
-fn extents_f32<E: EpsilonProviderF32>(
+fn extents_f32(
     mut points: impl Iterator<Item = [f32; 2]>,
-    epsilon_provider: &E,
+    epsilon_for_mag: impl Fn(f32) -> f32,
 ) -> ExtentsF32 {
     let Some(first) = points.next() else {
         return Default::default();
@@ -755,7 +717,7 @@ fn extents_f32<E: EpsilonProviderF32>(
     });
 
     let fp_mag = fp_mag_pt_f32(min).max(fp_mag_pt_f32(max));
-    let epsilon = epsilon_provider.value(fp_mag);
+    let epsilon = epsilon_for_mag(fp_mag);
 
     let scale = [
         u16::MAX as f32 / (max[0] - min[0] + 2. * epsilon),
@@ -1123,7 +1085,7 @@ mod tests {
     fn test_segment_bbox_horizontal() {
         let start = [0.2_f32, 0.5];
         let end = [0.8, 0.5];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] < bbox.max[0]);
@@ -1135,7 +1097,7 @@ mod tests {
     fn test_segment_bbox_vertical() {
         let start = [0.5_f32, 0.2];
         let end = [0.5, 0.8];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] <= bbox.max[0]);
@@ -1147,7 +1109,7 @@ mod tests {
     fn test_segment_bbox_diagonal() {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 1.0];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] < bbox.max[0]);
@@ -1159,7 +1121,7 @@ mod tests {
     fn test_segment_bbox_point() {
         let start = [0.5_f32, 0.5];
         let end = [0.5, 0.5];
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox = segment_bbox_f32(start, end, extents, EPSILON_MIN_F32);
 
         assert!(bbox.min[0] <= bbox.max[0]);
@@ -1177,7 +1139,7 @@ mod tests {
         let start2 = [0.5_f32, 0.5];
         let end2 = [1., 0.5];
 
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox1 = segment_bbox_f32(start1, end1, extents, EPSILON_MIN_F32);
         let bbox2 = segment_bbox_f32(start2, end2, extents, EPSILON_MIN_F32);
 
@@ -1192,7 +1154,7 @@ mod tests {
         let start2 = [0.2_f32, 0.4];
         let end2 = [0.1, 0.5];
 
-        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), &DefaultEpsilon);
+        let extents = extents_f32([[0., 0.], [1., 1.]].into_iter(), |_| EPSILON_MIN_F32);
         let bbox1 = segment_bbox_f32(start1, end1, extents, EPSILON_MIN_F32);
         let bbox2 = segment_bbox_f32(start2, end2, extents, EPSILON_MIN_F32);
 
@@ -1335,5 +1297,46 @@ mod tests {
 
         let result = intersect_lines_f32(a1, a2, b1, b2);
         assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
+    }
+}
+
+pub struct BasicKernelF32 {
+    pub points: Vec<[f32; 2]>,
+}
+
+impl KernelF32 for BasicKernelF32 {
+    type Vertex = u32;
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        self.points[v as usize]
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
+pub struct BasicKernelF32WithCustomEpsilon {
+    pub points: Vec<[f32; 2]>,
+    pub epsilon: f32,
+}
+
+impl KernelF32 for BasicKernelF32WithCustomEpsilon {
+    type Vertex = u32;
+
+    fn epsilon(&self, fp_mag: f32) -> f32 {
+        self.epsilon.max(EPSILON_RATE_F32 * fp_mag)
+    }
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        self.points[v as usize]
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
     }
 }

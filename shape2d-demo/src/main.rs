@@ -1,7 +1,6 @@
 use eframe::egui;
 use egui_plot::{Line, Plot, Points, Polygon as PlotPolygon};
-use shape2d::kernel::Direct;
-use shape2d::kernel::line::{CapStyleF32, F32 as Kernel};
+use shape2d::kernel::line::{BasicKernelF32WithCustomEpsilon, CapStyleF32, KernelF32};
 use shape2d::triangle_kernel::TriangleKernelF32 as TriangleKernel;
 use shape2d::{clean, clip, offset_raw, triangulate};
 
@@ -150,7 +149,7 @@ const ARC_TOLERANCE: f32 = 0.001;
 const MITER_LIMIT: f32 = 4.;
 
 struct ProcessingResults {
-    kernel: Kernel<Vec<[f32; 2]>, Direct, f32>,
+    kernel: BasicKernelF32WithCustomEpsilon,
     triangle_kernel: TriangleKernel,
     input_edges: Vec<(u32, u32)>,
     cleaned_edges: Vec<(u32, u32)>,
@@ -174,10 +173,9 @@ impl ProcessingResults {
         let input_edges = input_edges.to_vec();
 
         // Create kernel with vertices and epsilon
-        let mut kernel: Kernel<_, Direct, _> = Kernel {
+        let mut kernel = BasicKernelF32WithCustomEpsilon {
             points: input_vertices.to_vec(),
             epsilon,
-            ..Default::default()
         };
 
         // Step 1: Clean the edges (remove intersections)
