@@ -4,7 +4,7 @@ const EPSILON_MIN_F32: f32 = 1e-5;
 const EPSILON_RATE_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{Edge, EdgeSide, Kernel, VertexEvent},
+    kernel::{Edge, EdgeInteraction, EdgeSide, Kernel, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{TriangleKernel, TriangleKernelF32},
@@ -27,6 +27,8 @@ pub enum CapStyleF32 {
     Miter { limit: f32 },
 }
 
+pub enum NeverCurve {}
+
 impl<K: KernelF32> Kernel for K
 where
     (K::Vertex, K::Vertex): Edge,
@@ -34,27 +36,35 @@ where
     type Vertex = K::Vertex;
     type Edge = (K::Vertex, K::Vertex);
     type Extents = ExtentsF32;
-    type Point = [f32; 2];
+    type MergePoint = [f32; 2];
+    type MergeCurve = NeverCurve;
+    type SplitPoint = [f32; 2];
+    type IntersectionPoint = [f32; 2];
     type SweepLineEdgePortion = ();
     type SweepLineEventPoint = K::Vertex; // TODO rename this or see if it should be Point instead
     type TriangleKernel = TriangleKernelF32;
     type CapStyle = CapStyleF32;
     type OffsetAmount = f32;
 
-    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
+    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::MergePoint> {
         let pt_a = self.pt(a);
         let pt_b = self.pt(b);
         let fp_mag = fp_mag_pt_f32(pt_a).max(fp_mag_pt_f32(pt_b));
-        points_coincident_f32(self.pt(a), self.pt(b), self.epsilon(fp_mag))
+        points_coincident_f32(pt_a, pt_b, self.epsilon(fp_mag))
+            .then(|| merge_points_f32(pt_a, pt_b))
     }
 
-    fn edges_coincident(&self, _a: Self::Edge, _b: Self::Edge) -> bool {
+    fn edges_coincident(
+        &self,
+        _a: Self::Edge,
+        _b: Self::Edge,
+    ) -> EdgeInteraction<Self::MergeCurve> {
         // Line segments will never be coincident unless they share endpoints,
-        // in which case they will simply be equal
-        false
+        // in which case they will simply be equal (or opposite)
+        EdgeInteraction::None
     }
 
-    fn vertex_on_edge(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point> {
+    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::SplitPoint> {
         let vertex_pt = self.pt(vertex);
         let edge_start_pt = self.pt(edge.0);
         let edge_end_pt = self.pt(edge.1);
@@ -65,7 +75,7 @@ where
         point_on_segment_f32(vertex_pt, edge_start_pt, edge_end_pt, self.epsilon(fp_mag))
     }
 
-    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point> {
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::IntersectionPoint> {
         if a.0 == b.0 || a.0 == b.1 || a.1 == b.0 || a.1 == b.1 {
             // Segments that share an endpoint don't intersect
             return None;
@@ -79,16 +89,19 @@ where
         )?)
     }
 
-    // TODO: Can this be removed or made more specific?
-    fn push_vertex(&mut self, intersection: Self::Point) -> Self::Vertex {
+    fn new_split_vertex(&mut self, intersection: Self::SplitPoint) -> Self::Vertex {
         self.new_vertex(intersection)
     }
 
-    fn merged_vertex(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {
-        self.new_vertex(merge_points_f32(self.pt(a), self.pt(b)))
+    fn new_intersection_vertex(&mut self, intersection: Self::IntersectionPoint) -> Self::Vertex {
+        self.new_vertex(intersection)
     }
 
-    fn merged_edges(&mut self, _a: Self::Edge, _b: Self::Edge) -> (Self::Edge, Self::Edge) {
+    fn merge_vertices(&mut self, pt: Self::MergePoint) -> Self::Vertex {
+        self.new_vertex(pt)
+    }
+
+    fn merge_edges(&mut self, _curve: Self::MergeCurve) -> Self::Edge {
         panic!("Not possible to merge line segments");
     }
 

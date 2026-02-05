@@ -1,5 +1,6 @@
-use crate::kernel::{Edge, Kernel};
+use crate::kernel::{Edge, EdgeInteraction, Kernel};
 use crate::rtree::{RTree, Rect};
+use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::iter;
@@ -26,20 +27,29 @@ enum Action<K: Kernel> {
     /// Cancel two opposite edges
     CancelEdges { e1: K::Edge, e2: K::Edge },
     /// Merge two coincident vertices
-    MergeVertices { v1: K::Vertex, v2: K::Vertex },
+    MergeVertices {
+        v1: K::Vertex,
+        v2: K::Vertex,
+        pt: K::MergePoint,
+    },
     /// Merge two coincident edges
-    MergeEdges { e1: K::Edge, e2: K::Edge },
+    MergeEdges {
+        e1: K::Edge,
+        e2: K::Edge,
+        cancel: bool,
+        curve: K::MergeCurve,
+    },
     /// Split an edge at a vertex
     SplitEdge {
         edge: K::Edge,
         split_vertex: K::Vertex,
-        pt: K::Point,
+        pt: K::SplitPoint,
     },
     /// Split both edges at their intersection point
     SplitBothEdges {
         e1: K::Edge,
         e2: K::Edge,
-        pt: K::Point,
+        pt: K::IntersectionPoint,
     },
 }
 
@@ -51,15 +61,21 @@ impl<K: Kernel> std::fmt::Debug for Action<K> {
                 .field("e1", e1)
                 .field("e2", e2)
                 .finish(),
-            Action::MergeVertices { v1, v2 } => f
+            Action::MergeVertices { v1, v2, pt: _ } => f
                 .debug_struct("MergeVertices")
                 .field("v1", v1)
                 .field("v2", v2)
                 .finish(),
-            Action::MergeEdges { e1, e2 } => f
+            Action::MergeEdges {
+                e1,
+                e2,
+                cancel,
+                curve: _,
+            } => f
                 .debug_struct("MergeEdges")
                 .field("e1", e1)
                 .field("e2", e2)
+                .field("cancel", cancel)
                 .finish(),
             Action::SplitEdge {
                 edge,
@@ -253,8 +269,10 @@ impl<K: Kernel> SpatialIndex<K> {
             'itest: {
                 // Test 1: Check for coincident vertices within this edge
                 if let Some((v1, v2)) = kernel.vertices_for_edge(dirty_edge) {
-                    if v1 != v2 && kernel.vertices_coincident(v1, v2) {
-                        action = Some(Action::MergeVertices { v1, v2 });
+                    if v1 != v2
+                        && let Some(pt) = kernel.vertices_coincident(v1, v2)
+                    {
+                        action = Some(Action::MergeVertices { pt, v1, v2 });
                         break 'itest;
                     }
                 }
@@ -277,12 +295,26 @@ impl<K: Kernel> SpatialIndex<K> {
                         }
 
                         // Test 3: Check if these two edges are fully coincident
-                        if kernel.edges_coincident(dirty_edge, candidate_edge) {
-                            action = Some(Action::MergeEdges {
-                                e1: dirty_edge,
-                                e2: candidate_edge,
-                            });
-                            break 'itest;
+                        match kernel.edges_coincident(dirty_edge, candidate_edge) {
+                            EdgeInteraction::Merge(curve) => {
+                                action = Some(Action::MergeEdges {
+                                    e1: dirty_edge,
+                                    e2: candidate_edge,
+                                    cancel: false,
+                                    curve,
+                                });
+                                break 'itest;
+                            }
+                            EdgeInteraction::Cancel(curve) => {
+                                action = Some(Action::MergeEdges {
+                                    e1: dirty_edge,
+                                    e2: candidate_edge,
+                                    cancel: true,
+                                    curve,
+                                });
+                                break 'itest;
+                            }
+                            EdgeInteraction::None => {}
                         }
 
                         // Test 4: Check for coincident vertices
@@ -296,9 +328,11 @@ impl<K: Kernel> SpatialIndex<K> {
                                 (e1_end, e2_start),
                                 (e1_end, e2_end),
                             ] {
-                                if v1 != v2 && kernel.vertices_coincident(v1, v2) {
+                                if v1 != v2
+                                    && let Some(pt) = kernel.vertices_coincident(v1, v2)
+                                {
                                     {
-                                        action = Some(Action::MergeVertices { v1, v2 });
+                                        action = Some(Action::MergeVertices { v1, v2, pt });
                                         break 'itest;
                                     }
                                 }
@@ -320,7 +354,7 @@ impl<K: Kernel> SpatialIndex<K> {
                                         continue 'v_on_e;
                                     }
                                 }
-                                if let Some(pt) = kernel.vertex_on_edge(vertex, candidate_edge) {
+                                if let Some(pt) = kernel.split(vertex, candidate_edge) {
                                     action = Some(Action::SplitEdge {
                                         edge: candidate_edge,
                                         split_vertex: vertex,
@@ -337,7 +371,7 @@ impl<K: Kernel> SpatialIndex<K> {
                                         continue 'v_on_e;
                                     }
                                 }
-                                if let Some(pt) = kernel.vertex_on_edge(vertex, dirty_edge) {
+                                if let Some(pt) = kernel.split(vertex, dirty_edge) {
                                     action = Some(Action::SplitEdge {
                                         edge: dirty_edge,
                                         split_vertex: vertex,
@@ -391,9 +425,9 @@ impl<K: Kernel> SpatialIndex<K> {
                         );
                     }
                 }
-                Action::MergeVertices { v1, v2 } => {
+                Action::MergeVertices { v1, v2, pt } => {
                     // Add merged vertex as a new vertex
-                    let merged_vertex = kernel.merged_vertex(v1, v2);
+                    let merged_vertex = kernel.merge_vertices(pt);
 
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
@@ -417,20 +451,57 @@ impl<K: Kernel> SpatialIndex<K> {
                         }
                     }
                 }
-                Action::MergeEdges { e1, e2 } => {
-                    // Construct merged edges
-                    let (new_e1, new_e2) = kernel.merged_edges(e1, e2);
+                Action::MergeEdges {
+                    e1,
+                    e2,
+                    cancel,
+                    curve,
+                } => {
+                    // Construct merged edge
+                    let new_e = kernel.merge_edges(curve);
 
                     // Remove old edges
                     let old_e1 = self.remove(kernel, e1);
                     let old_e2 = self.remove(kernel, e2);
 
-                    // Insert new edges
-                    // (Doesn't really matter which hilbert value we use,
-                    // or even if we use different ones,
-                    // but let's put them into the same hilbert value)
-                    self.insert(kernel, new_e1, old_e1.hilbert_value, old_e1.multiplicity);
-                    self.insert(kernel, new_e2, old_e1.hilbert_value, old_e2.multiplicity);
+                    // Insert new edges based on old multiplicities,
+                    // and whether they add or cancel.
+                    // Note: It doesn't really matter which old edge we choose
+                    // to take the hilbert value from
+                    match cancel {
+                        false => {
+                            self.insert(
+                                kernel,
+                                new_e,
+                                old_e1.hilbert_value,
+                                old_e1.multiplicity + old_e2.multiplicity,
+                            );
+                        }
+                        true => {
+                            match old_e1.multiplicity.cmp(&old_e2.multiplicity) {
+                                Ordering::Less => {
+                                    // Reverse the new edge
+                                    self.insert(
+                                        kernel,
+                                        new_e.reversed(),
+                                        old_e1.hilbert_value,
+                                        old_e2.multiplicity - old_e1.multiplicity,
+                                    );
+                                }
+                                Ordering::Equal => {
+                                    // Full cancellation, no edges to insert
+                                }
+                                Ordering::Greater => {
+                                    self.insert(
+                                        kernel,
+                                        new_e.reversed(),
+                                        old_e1.hilbert_value,
+                                        old_e1.multiplicity - old_e2.multiplicity,
+                                    );
+                                }
+                            }
+                        }
+                    }
                 }
                 Action::SplitEdge {
                     edge,
@@ -438,7 +509,7 @@ impl<K: Kernel> SpatialIndex<K> {
                     pt,
                 } => {
                     // Add split point as a new vertex
-                    let new_split_vertex = kernel.push_vertex(pt);
+                    let new_split_vertex = kernel.new_split_vertex(pt);
 
                     // Update all edges referencing old_split_vertex
                     while let Some(edge) = { self.edges_for_vertex(old_split_vertex).next() } {
@@ -462,9 +533,9 @@ impl<K: Kernel> SpatialIndex<K> {
                 Action::SplitBothEdges {
                     e1: edge_a,
                     e2: edge_b,
-                    pt: intersection,
+                    pt,
                 } => {
-                    let vertex = kernel.push_vertex(intersection);
+                    let vertex = kernel.new_intersection_vertex(pt);
                     let (edge_a1, edge_a2) = kernel.split_edge(edge_a, vertex);
                     let (edge_b1, edge_b2) = kernel.split_edge(edge_b, vertex);
 
