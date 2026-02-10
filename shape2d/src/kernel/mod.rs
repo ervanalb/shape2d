@@ -23,8 +23,14 @@ pub trait Kernel: Sized {
     /// Check if two vertices are coincident (at the same location)
     fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::MergePoint>;
 
-    /// Check if two edges are coincident (fully overlap)
-    fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> EdgeInteraction<Self::MergeCurve>;
+    /// Check if two edges are coincident (fully overlap.)
+    /// These edges must already share all of their vertices
+    /// and not be equal (or opposite)
+    fn edges_coincident(
+        &self,
+        a: Self::Edge,
+        b: Self::Edge,
+    ) -> Option<(EdgeCoincidence, Self::MergeCurve)>;
 
     /// Check if this vertex lies on the edge from edge_start to edge_end,
     /// and if so, return the point on the edge nearest to the vertex
@@ -37,14 +43,16 @@ pub trait Kernel: Sized {
     fn merge_vertices(&mut self, pt: Self::MergePoint) -> Self::Vertex;
 
     /// Merge two edges, returning the merged result.
-    /// These edges must already share all of their vertices
     fn merge_edges(&mut self, curve: Self::MergeCurve) -> Self::Edge;
 
-    /// Creates a new vertex from a split edge
-    fn new_split_vertex(&mut self, pt: Self::SplitPoint) -> Self::Vertex;
-
-    /// Creates a new vertex from an intersection
-    fn new_intersection_vertex(&mut self, pt: Self::IntersectionPoint) -> Self::Vertex;
+    /// Split an edge at the given point, returning the new edges.
+    /// This is called twice for intersections.
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        vertex: Self::Vertex,
+        pt: Self::SplitPoint,
+    ) -> (Self::Edge, Self::Edge);
 
     /// Generate an "extents" object from a list of edges,
     /// which is used when calculating the edge_bbox
@@ -169,8 +177,8 @@ impl Edge for (u32, u32) {
     }
 }
 
-pub enum EdgeInteraction<T> {
-    None,
-    Merge(T),  // Curves are in same direction
-    Cancel(T), // Curves are in opposite directions
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EdgeCoincidence {
+    SameDirection,      // Curves are in same direction
+    OppositeDirections, // Curves are in opposite directions
 }

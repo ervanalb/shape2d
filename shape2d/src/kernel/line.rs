@@ -4,7 +4,7 @@ const EPSILON_MIN_F32: f32 = 1e-5;
 const EPSILON_RATE_F32: f32 = 1e-5;
 
 use crate::{
-    kernel::{Edge, EdgeInteraction, EdgeSide, Kernel, VertexEvent},
+    kernel::{Edge, EdgeCoincidence, EdgeSide, Kernel, VertexEvent},
     rtree::Rect,
     sweep_line::{SweepLineChain, SweepLineEvent, SweepLineEventType, SweepLineSegment},
     triangle_kernel::{TriangleKernel, TriangleKernelF32},
@@ -12,12 +12,41 @@ use crate::{
 
 pub trait KernelF32 {
     type Vertex: Copy + std::fmt::Debug + Ord;
+    type Edge: Edge;
 
     fn epsilon(&self, fp_mag: f32) -> f32 {
         EPSILON_MIN_F32.max(EPSILON_RATE_F32 * fp_mag)
     }
     fn pt(&self, v: Self::Vertex) -> [f32; 2];
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex;
+    fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex);
+
+    fn merge_vertices(&mut self, pt: [f32; 2]) -> Self::Vertex;
+    fn merge_edges(
+        &mut self,
+        a: Self::Edge,
+        b: Self::Edge,
+        coincidence: EdgeCoincidence,
+    ) -> Self::Edge;
+
+    fn nudge_edge(
+        &mut self,
+        edge: Self::Edge,
+        new_start: Self::Vertex,
+        new_end: Self::Vertex,
+    ) -> Self::Edge;
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        vertex: Self::Vertex,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge);
+    fn split_edges(
+        &mut self,
+        a: Self::Edge,
+        b: Self::Edge,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge);
+    fn new_offset_vertex(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -27,17 +56,15 @@ pub enum CapStyleF32 {
     Miter { limit: f32 },
 }
 
-pub enum NeverCurve {}
-
 impl<K: KernelF32> Kernel for K
 where
     (K::Vertex, K::Vertex): Edge,
 {
     type Vertex = K::Vertex;
-    type Edge = (K::Vertex, K::Vertex);
+    type Edge = K::Edge;
     type Extents = ExtentsF32;
     type MergePoint = [f32; 2];
-    type MergeCurve = NeverCurve;
+    type MergeCurve = ();
     type SplitPoint = [f32; 2];
     type IntersectionPoint = [f32; 2];
     type SweepLineEdgePortion = ();
@@ -56,18 +83,26 @@ where
 
     fn edges_coincident(
         &self,
-        _a: Self::Edge,
-        _b: Self::Edge,
-    ) -> EdgeInteraction<Self::MergeCurve> {
-        // Line segments will never be coincident unless they share endpoints,
-        // in which case they will simply be equal (or opposite)
-        EdgeInteraction::None
+        a: Self::Edge,
+        b: Self::Edge,
+    ) -> Option<(EdgeCoincidence, Self::MergeCurve)> {
+        // Line segments are necessarily coincident if they share both vertices
+        let (a_start, a_end) = self.vs(a);
+        let (b_start, b_end) = self.vs(b);
+        if a_start == b_start && a_end == b_end {
+            Some((EdgeCoincidence::SameDirection, ()))
+        } else if a_start == b_end && a_end == b_start {
+            Some((EdgeCoincidence::OppositeDirections, ()))
+        } else {
+            None
+        }
     }
 
     fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::SplitPoint> {
         let vertex_pt = self.pt(vertex);
-        let edge_start_pt = self.pt(edge.0);
-        let edge_end_pt = self.pt(edge.1);
+        let edge_vs = self.vs(edge);
+        let edge_start_pt = self.pt(edge_vs.0);
+        let edge_end_pt = self.pt(edge_vs.1);
         let fp_mag = fp_mag_pt_f32(vertex_pt)
             .max(fp_mag_pt_f32(edge_start_pt))
             .max(fp_mag_pt_f32(edge_end_pt));
@@ -76,45 +111,81 @@ where
     }
 
     fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::IntersectionPoint> {
-        if a.0 == b.0 || a.0 == b.1 || a.1 == b.0 || a.1 == b.1 {
+        let a_vs = self.vs(a);
+        let b_vs = self.vs(b);
+        if a_vs.0 == b_vs.0 || a_vs.0 == b_vs.1 || a_vs.1 == b_vs.0 || a_vs.1 == b_vs.1 {
             // Segments that share an endpoint don't intersect
             return None;
         }
 
-        Some(intersect_segments_f32(
-            self.pt(a.0),
-            self.pt(a.1),
-            self.pt(b.0),
-            self.pt(b.1),
-        )?)
+        intersect_segments_f32(
+            self.pt(a_vs.0),
+            self.pt(a_vs.1),
+            self.pt(b_vs.0),
+            self.pt(b_vs.1),
+        )
     }
 
-    fn new_split_vertex(&mut self, intersection: Self::SplitPoint) -> Self::Vertex {
-        self.new_vertex(intersection)
+    /*
+    fn new_split_vertex(&mut self, pt: Self::SplitPoint) -> Self::Vertex {
+        <Self as KernelF32>::new_split_vertex(self, pt)
     }
 
-    fn new_intersection_vertex(&mut self, intersection: Self::IntersectionPoint) -> Self::Vertex {
-        self.new_vertex(intersection)
+    fn new_intersection_vertex(&mut self, pt: Self::IntersectionPoint) -> Self::Vertex {
+        <Self as KernelF32>::new_intersection_vertex(self, pt)
     }
 
     fn merge_vertices(&mut self, pt: Self::MergePoint) -> Self::Vertex {
-        self.new_vertex(pt)
+        <Self as KernelF32>::merge_vertices(pt)
     }
 
     fn merge_edges(&mut self, _curve: Self::MergeCurve) -> Self::Edge {
-        panic!("Not possible to merge line segments");
+        <Self as KernelF32::merge_edges(pt)
     }
+
+    fn replace_vertex_in_edge(
+        &mut self,
+        edge: Self::Edge,
+        old_v: Self::Vertex,
+        new_v: Self::Vertex,
+    ) -> Option<Self::Edge> {
+        let (mut start, mut end) = self.vs(edge);
+
+        if start == old_v {
+            if end == new_v {
+                return None; // Reflex edge
+            }
+            start = new_v;
+        }
+        if end == old_v {
+            if start == new_v {
+                return None; // Reflex edge
+            }
+            end = new_v;
+        }
+        Some(self.new_edge(edge, start, end))
+    }
+
+    fn split_edge(&mut self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {
+        self.new_split_edges(edge, vertex)
+    }
+
+    */
 
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
         extents_f32(
-            edges.flat_map(|(a, b)| [self.pt(a), self.pt(b)]),
+            edges.flat_map(|e| {
+                let (start, end) = self.vs(e);
+                [self.pt(start), self.pt(end)]
+            }),
             |fp_mag| self.epsilon(fp_mag),
         )
     }
 
     fn edge_bbox(&self, edge: Self::Edge, extents: &Self::Extents) -> Rect {
-        let edge_start_pt = self.pt(edge.0);
-        let edge_end_pt = self.pt(edge.1);
+        let (edge_start, edge_end) = self.vs(edge);
+        let edge_start_pt = self.pt(edge_start);
+        let edge_end_pt = self.pt(edge_end);
         let fp_mag = fp_mag_pt_f32(edge_start_pt).max(fp_mag_pt_f32(edge_end_pt));
         segment_bbox_f32(edge_start_pt, edge_end_pt, *extents, self.epsilon(fp_mag))
     }
@@ -124,32 +195,7 @@ where
     }
 
     fn vertices_for_edge(&self, edge: Self::Edge) -> Option<(Self::Vertex, Self::Vertex)> {
-        Some((edge.0, edge.1))
-    }
-
-    fn replace_vertex_in_edge(
-        &mut self,
-        mut edge: Self::Edge,
-        old_v: Self::Vertex,
-        new_v: Self::Vertex,
-    ) -> Option<Self::Edge> {
-        if edge.0 == old_v {
-            if edge.1 == new_v {
-                return None; // Reflex edge
-            }
-            edge.0 = new_v;
-        }
-        if edge.1 == old_v {
-            if edge.0 == new_v {
-                return None; // Reflex edge
-            }
-            edge.1 = new_v;
-        }
-        Some(edge)
-    }
-
-    fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {
-        ((edge.0, vertex), (vertex, edge.1))
+        Some(self.vs(edge))
     }
 
     fn sweep_line_events_for_edge(
@@ -159,7 +205,8 @@ where
         // Edges always have exactly 2 events.
         // We will use the `segment` data to store whether this edge is bottom (going  right) or top (going left)
         // based on how its endpoints sort in sweep-line order.
-        let chain = match sweep_line_cmp_f32(self.pt(edge.0), self.pt(edge.1)) {
+        let (start, end) = self.vs(edge);
+        let chain = match sweep_line_cmp_f32(self.pt(start), self.pt(end)) {
             Ordering::Less => SweepLineChain::Bottom,
             Ordering::Equal => {
                 panic!("Encountered a reflex edge (which are invalid)");
@@ -185,12 +232,12 @@ where
         let a_pt = self.pt(sweep_line_select_vertex(
             a.event_type,
             a.segment.chain,
-            a.segment.edge,
+            self.vs(a.segment.edge),
         ));
         let b_pt = self.pt(sweep_line_select_vertex(
             b.event_type,
             b.segment.chain,
-            b.segment.edge,
+            self.vs(b.segment.edge),
         ));
 
         // Compare first by event point (sweep-line order)
@@ -204,12 +251,12 @@ where
                 let a_other_pt = self.pt(sweep_line_select_vertex(
                     shared_event_type.other(),
                     a.segment.chain,
-                    a.segment.edge,
+                    self.vs(a.segment.edge),
                 ));
                 let b_other_pt = self.pt(sweep_line_select_vertex(
                     shared_event_type.other(),
                     b.segment.chain,
-                    b.segment.edge,
+                    self.vs(b.segment.edge),
                 ));
                 match shared_event_type {
                     SweepLineEventType::End => sin_cmp_f32(shared_pt, b_other_pt, a_other_pt),
@@ -219,7 +266,11 @@ where
     }
 
     fn sweep_line_event_point(&self, event: &SweepLineEvent<Self>) -> Self::SweepLineEventPoint {
-        sweep_line_select_vertex(event.event_type, event.segment.chain, event.segment.edge)
+        sweep_line_select_vertex(
+            event.event_type,
+            event.segment.chain,
+            self.vs(event.segment.edge),
+        )
     }
 
     fn sweep_line_segment_cmp(
@@ -227,9 +278,10 @@ where
         segment: &SweepLineSegment<Self>,
         event_point: Self::SweepLineEventPoint,
     ) -> Ordering {
+        let (start, end) = self.vs(segment.edge);
         let (left_i, right_i) = match segment.chain {
-            SweepLineChain::Bottom => (segment.edge.0, segment.edge.1),
-            SweepLineChain::Top => (segment.edge.1, segment.edge.0),
+            SweepLineChain::Bottom => (start, end),
+            SweepLineChain::Top => (end, start),
         };
         let left_pt = self.pt(left_i);
         let right_pt = self.pt(right_i);
@@ -256,8 +308,8 @@ where
     }
 
     fn vertex_event_cmp(&self, a: &VertexEvent<Self>, b: &VertexEvent<Self>) -> Ordering {
-        let a_pt = self.pt(select_vertex(a.event_type, a.edge));
-        let b_pt = self.pt(select_vertex(b.event_type, b.edge));
+        let a_pt = self.pt(select_vertex(a.event_type, self.vs(a.edge)));
+        let b_pt = self.pt(select_vertex(b.event_type, self.vs(b.edge)));
 
         // Compare first by event point (arbitrary; we'll pick sweep-line order)
         sweep_line_cmp_f32(a_pt, b_pt)
@@ -265,8 +317,8 @@ where
             // and go CCW from there
             .then_with(|| {
                 let shared_pt = a_pt;
-                let a_other_pt = self.pt(select_vertex(a.event_type.other(), a.edge));
-                let b_other_pt = self.pt(select_vertex(b.event_type.other(), b.edge));
+                let a_other_pt = self.pt(select_vertex(a.event_type.other(), self.vs(a.edge)));
+                let b_other_pt = self.pt(select_vertex(b.event_type.other(), self.vs(b.edge)));
 
                 let a = [a_other_pt[0] - shared_pt[0], a_other_pt[1] - shared_pt[1]];
                 let b = [b_other_pt[0] - shared_pt[0], b_other_pt[1] - shared_pt[1]];
@@ -292,6 +344,16 @@ where
 
     fn offset_edge_loops(
         &mut self,
+        _edge_loops: &[(u32, Self::Edge)],
+        _offset: Self::OffsetAmount,
+        _cap_style: Self::CapStyle,
+    ) -> Vec<Self::Edge> {
+        todo!();
+    }
+
+    /*
+    fn offset_edge_loops(
+        &mut self,
         edge_loops: &[(u32, Self::Edge)],
         offset: Self::OffsetAmount,
         cap_style: Self::CapStyle,
@@ -312,7 +374,8 @@ where
 
         for edge_loop in edge_loops.chunk_by(|(i1, _), (i2, _)| i1 == i2) {
             let (_, first_original_edge) = edge_loop[edge_loop.len() - 1];
-            let (first_original_edge_start_v, first_original_edge_end_v) = first_original_edge;
+            let (first_original_edge_start_v, first_original_edge_end_v) =
+                self.vs(first_original_edge);
             let first_original_edge_start_pt = self.pt(first_original_edge_start_v);
             let first_original_edge_end_pt = self.pt(first_original_edge_end_v);
             let (first_offset_edge_start_pt, first_offset_edge_end_pt) = offset_segment(
@@ -320,14 +383,15 @@ where
                 first_original_edge_end_pt,
                 offset,
             );
-            let first_offset_edge_start_v = self.new_vertex(first_offset_edge_start_pt);
+            let first_offset_edge_start_v =
+                self.new_offset_vertex(first_original_edge_start_v, first_offset_edge_start_pt);
 
             let mut prev_offset_edge_start_v = first_offset_edge_start_v;
             let mut prev_offset_edge_start_pt = first_offset_edge_start_pt;
             let mut prev_offset_edge_end_pt = first_offset_edge_end_pt;
 
             for (i, &(_, original_edge)) in edge_loop[0..].iter().enumerate() {
-                let (original_edge_start_v, original_edge_end_v) = original_edge;
+                let (original_edge_start_v, original_edge_end_v) = self.vs(original_edge);
                 let original_edge_start_pt = self.pt(original_edge_start_v);
                 let original_edge_end_pt = self.pt(original_edge_end_v);
                 let offset_edge_start_pt;
@@ -344,9 +408,10 @@ where
                     // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a))
                     // which can then be expressed using dot & cross products.
                     {
-                        let (_, (prev_edge_start_v, _)) =
-                            edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
-                        let (_, (_, next_edge_end_v)) = edge_loop[(i + 1) % edge_loop.len()];
+                        let (_, prev_edge) = edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
+                        let (prev_edge_start_v, _) = self.vs(prev_edge);
+                        let (_, next_edge) = edge_loop[(i + 1) % edge_loop.len()];
+                        let (_, next_edge_end_v) = self.vs(prev_edge);
                         let pt1 = self.pt(prev_edge_start_v);
                         let pt2 = original_edge_start_pt;
                         let pt3 = original_edge_end_pt;
@@ -394,6 +459,9 @@ where
                     // Offset the edge
                     (offset_edge_start_pt, offset_edge_end_pt) =
                         offset_segment(original_edge_start_pt, original_edge_end_pt, offset);
+
+                    // TODO: Create the actual Edge and the two Vertices
+                    // so that we can re-use the cleaning intersection routines
 
                     // OPTIMIZATION:
                     // Check for intersection with the previous segment,
@@ -586,6 +654,7 @@ where
         }
         result_edges
     }
+    */
 }
 
 #[repr(transparent)]
@@ -658,6 +727,25 @@ impl KernelF32 for BasicKernelF32WithCustomEpsilon {
     fn epsilon(&self, fp_mag: f32) -> f32 {
         self.epsilon.max(EPSILON_RATE_F32 * fp_mag)
     }
+
+    fn pt(&self, v: Self::Vertex) -> [f32; 2] {
+        self.points[v as usize]
+    }
+
+    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
+pub struct ColorKernelF32 {
+    pub points: Vec<[f32; 2]>,
+    pub colors: Vec<[f32; 4]>,
+}
+
+impl KernelF32 for ColorKernelF32 {
+    type Vertex = u32;
 
     fn pt(&self, v: Self::Vertex) -> [f32; 2] {
         self.points[v as usize]

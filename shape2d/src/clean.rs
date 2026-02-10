@@ -1,4 +1,4 @@
-use crate::kernel::{Edge, EdgeInteraction, Kernel};
+use crate::kernel::{Edge, EdgeCoincidence, Kernel};
 use crate::rtree::{RTree, Rect};
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
@@ -36,7 +36,7 @@ enum Action<K: Kernel> {
     MergeEdges {
         e1: K::Edge,
         e2: K::Edge,
-        cancel: bool,
+        coincidence: EdgeCoincidence,
         curve: K::MergeCurve,
     },
     /// Split an edge at a vertex
@@ -69,13 +69,13 @@ impl<K: Kernel> std::fmt::Debug for Action<K> {
             Action::MergeEdges {
                 e1,
                 e2,
-                cancel,
+                coincidence,
                 curve: _,
             } => f
                 .debug_struct("MergeEdges")
                 .field("e1", e1)
                 .field("e2", e2)
-                .field("cancel", cancel)
+                .field("coincidence", coincidence)
                 .finish(),
             Action::SplitEdge {
                 edge,
@@ -295,26 +295,16 @@ impl<K: Kernel> SpatialIndex<K> {
                         }
 
                         // Test 3: Check if these two edges are fully coincident
-                        match kernel.edges_coincident(dirty_edge, candidate_edge) {
-                            EdgeInteraction::Merge(curve) => {
-                                action = Some(Action::MergeEdges {
-                                    e1: dirty_edge,
-                                    e2: candidate_edge,
-                                    cancel: false,
-                                    curve,
-                                });
-                                break 'itest;
-                            }
-                            EdgeInteraction::Cancel(curve) => {
-                                action = Some(Action::MergeEdges {
-                                    e1: dirty_edge,
-                                    e2: candidate_edge,
-                                    cancel: true,
-                                    curve,
-                                });
-                                break 'itest;
-                            }
-                            EdgeInteraction::None => {}
+                        if let Some((coincidence, curve)) =
+                            kernel.edges_coincident(dirty_edge, candidate_edge)
+                        {
+                            action = Some(Action::MergeEdges {
+                                e1: dirty_edge,
+                                e2: candidate_edge,
+                                coincidence,
+                                curve,
+                            });
+                            break 'itest;
                         }
 
                         // Test 4: Check for coincident vertices
@@ -454,7 +444,7 @@ impl<K: Kernel> SpatialIndex<K> {
                 Action::MergeEdges {
                     e1,
                     e2,
-                    cancel,
+                    coincidence,
                     curve,
                 } => {
                     // Construct merged edge
@@ -468,8 +458,8 @@ impl<K: Kernel> SpatialIndex<K> {
                     // and whether they add or cancel.
                     // Note: It doesn't really matter which old edge we choose
                     // to take the hilbert value from
-                    match cancel {
-                        false => {
+                    match coincidence {
+                        EdgeCoincidence::SameDirection => {
                             self.insert(
                                 kernel,
                                 new_e,
@@ -477,7 +467,7 @@ impl<K: Kernel> SpatialIndex<K> {
                                 old_e1.multiplicity + old_e2.multiplicity,
                             );
                         }
-                        true => {
+                        EdgeCoincidence::OppositeDirections => {
                             match old_e1.multiplicity.cmp(&old_e2.multiplicity) {
                                 Ordering::Less => {
                                     // Reverse the new edge
