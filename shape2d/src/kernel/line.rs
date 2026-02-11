@@ -55,40 +55,34 @@ where
     type Vertex = K::Vertex;
     type Edge = K::Edge;
     type Extents = ExtentsF32;
-    type Point = [f32; 2];
-    type MergeCurve = ();
+    type T = f32;
     type SweepLineEdgePortion = ();
     type SweepLineEventPoint = K::Vertex; // TODO rename this or see if it should be Point instead
     type TriangleKernel = TriangleKernelF32;
     type CapStyle = CapStyleF32;
     type OffsetAmount = f32;
 
-    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::Point> {
+    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> bool {
         let pt_a = self.pt(a);
         let pt_b = self.pt(b);
         let fp_mag = fp_mag_pt_f32(pt_a).max(fp_mag_pt_f32(pt_b));
         points_coincident_f32(pt_a, pt_b, self.epsilon(fp_mag))
-            .then(|| merge_points_f32(pt_a, pt_b))
     }
 
-    fn edges_coincident(
-        &self,
-        a: Self::Edge,
-        b: Self::Edge,
-    ) -> Option<(EdgeCoincidence, Self::MergeCurve)> {
+    fn edges_coincident(&self, a: Self::Edge, b: Self::Edge) -> Option<EdgeCoincidence> {
         // Line segments are necessarily coincident if they share both vertices
         let (a_start, a_end) = self.vs(a);
         let (b_start, b_end) = self.vs(b);
         if a_start == b_start && a_end == b_end {
-            Some((EdgeCoincidence::SameDirection, ()))
+            Some(EdgeCoincidence::SameDirection)
         } else if a_start == b_end && a_end == b_start {
-            Some((EdgeCoincidence::OppositeDirections, ()))
+            Some(EdgeCoincidence::OppositeDirections)
         } else {
             None
         }
     }
 
-    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point> {
+    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::T> {
         let vertex_pt = self.pt(vertex);
         let edge_vs = self.vs(edge);
         let edge_start_pt = self.pt(edge_vs.0);
@@ -97,10 +91,10 @@ where
             .max(fp_mag_pt_f32(edge_start_pt))
             .max(fp_mag_pt_f32(edge_end_pt));
 
-        point_on_segment_f32(vertex_pt, edge_start_pt, edge_end_pt, self.epsilon(fp_mag))
+        t_on_segment_f32(vertex_pt, edge_start_pt, edge_end_pt, self.epsilon(fp_mag))
     }
 
-    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point> {
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<(Self::T, Self::T)> {
         let a_vs = self.vs(a);
         let b_vs = self.vs(b);
         if a_vs.0 == b_vs.0 || a_vs.0 == b_vs.1 || a_vs.1 == b_vs.0 || a_vs.1 == b_vs.1 {
@@ -116,12 +110,10 @@ where
         )
     }
 
-    fn merge_vertices(
-        &mut self,
-        a: Self::Vertex,
-        b: Self::Vertex,
-        pt: Self::Point,
-    ) -> Self::Vertex {
+    fn merge_vertices(&mut self, a: Self::Vertex, b: Self::Vertex) -> Self::Vertex {
+        let pt_a = self.pt(a);
+        let pt_b = self.pt(b);
+        let pt = merge_points_f32(pt_a, pt_b);
         <Self as KernelF32>::merge_vertices(self, a, b, pt)
     }
 
@@ -130,16 +122,15 @@ where
         a: Self::Edge,
         b: Self::Edge,
         coincidence: EdgeCoincidence,
-        _curve: Self::MergeCurve,
     ) -> Self::Edge {
         <Self as KernelF32>::merge_edges(self, a, b, coincidence)
     }
 
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        pt: Self::Point,
-    ) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, t: Self::T) -> (Self::Edge, Self::Edge) {
+        let (start_v, end_v) = self.vs(edge);
+        let start_pt = self.pt(start_v);
+        let end_pt = self.pt(end_v);
+        let pt = pt_on_segment_f32(start_pt, end_pt, t);
         <Self as KernelF32>::split_edge(self, edge, pt)
     }
 
@@ -740,11 +731,7 @@ impl KernelF32 for DirectKernelF32 {
         (start, end)
     }
 
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         ((edge.0, pt.into()), (pt.into(), edge.1))
     }
 
@@ -799,11 +786,7 @@ impl KernelF32 for BasicKernelF32 {
         (start, end)
     }
 
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         let v = self.insert_vertex(pt);
         ((edge.0, v), (v, edge.1))
     }
@@ -864,11 +847,7 @@ impl KernelF32 for BasicKernelF32WithCustomEpsilon {
         (start, end)
     }
 
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         let v = self.insert_vertex(pt);
         ((edge.0, v), (v, edge.1))
     }
@@ -939,11 +918,7 @@ impl KernelF32 for ColorKernelF32 {
         (start, end)
     }
 
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         let v = self.insert_vertex(pt, self.color(edge.0)); // XXX blend color
         ((edge.0, v), (v, edge.1))
     }
@@ -998,12 +973,23 @@ fn points_coincident_f32(a: [f32; 2], b: [f32; 2], epsilon: f32) -> bool {
 }
 
 #[inline]
-fn point_on_segment_f32(
+fn pt_on_segment_f32(segment_start: [f32; 2], segment_end: [f32; 2], t: f32) -> [f32; 2] {
+    let segment_dx = segment_end[0] - segment_start[0];
+    let segment_dy = segment_end[1] - segment_start[1];
+
+    [
+        segment_start[0] + t * segment_dx,
+        segment_start[1] + t * segment_dy,
+    ]
+}
+
+#[inline]
+fn t_on_segment_f32(
     p: [f32; 2],
     segment_start: [f32; 2],
     segment_end: [f32; 2],
     epsilon: f32,
-) -> Option<[f32; 2]> {
+) -> Option<f32> {
     let segment_dx = segment_end[0] - segment_start[0];
     let segment_dy = segment_end[1] - segment_start[1];
     let segment_len_sq = segment_dx * segment_dx + segment_dy * segment_dy;
@@ -1031,10 +1017,7 @@ fn point_on_segment_f32(
     }
 
     let t = dot / segment_len_sq;
-    Some([
-        segment_start[0] + segment_dx * t,
-        segment_start[1] + segment_dy * t,
-    ])
+    Some(t)
 }
 
 #[inline]
@@ -1043,7 +1026,7 @@ fn intersect_segments_f32(
     a_end: [f32; 2],
     b_start: [f32; 2],
     b_end: [f32; 2],
-) -> Option<[f32; 2]> {
+) -> Option<(f32, f32)> {
     // Perform separating axis test
     // Note: We will also return "no intersection" for any colinear segments.
     if matches!(
@@ -1170,49 +1153,31 @@ fn intersect_lines_f32(
     a_end: [f32; 2],
     b_start: [f32; 2],
     b_end: [f32; 2],
-) -> [f32; 2] {
-    // Promote to homogeneous coordinates
-    let a_start_h = [a_start[0], a_start[1], 1.0];
-    let a_end_h = [a_end[0], a_end[1], 1.0];
-    let b_start_h = [b_start[0], b_start[1], 1.0];
-    let b_end_h = [b_end[0], b_end[1], 1.0];
+) -> (f32, f32) {
+    // Given two lines defined by a starting point and an ending point,
+    // return the two parameter values (t, u) of the intersection
+    // where t=0 represents the starting point, and t=1 is the ending point.
 
-    // Lines using Plucker coordinates
-    let a = cross_f32(a_start_h, a_end_h);
-    let b = cross_f32(b_start_h, b_end_h);
+    // Line a: P = a_start + t * (a_end - a_start)
+    // Line b: Q = b_start + u * (b_end - b_start)
 
-    // Calculate intersection
-    let intersection_h = cross_f32(a, b);
+    let a_dx = a_end[0] - a_start[0];
+    let a_dy = a_end[1] - a_start[1];
+    let b_dx = b_end[0] - b_start[0];
+    let b_dy = b_end[1] - b_start[1];
 
-    // Divide out perspective coordinate
-    let z_inv = 1. / intersection_h[2];
-    let first_guess = [intersection_h[0] * z_inv, intersection_h[1] * z_inv];
+    // Cross product of direction vectors (determinant)
+    let det = a_dx * b_dy - a_dy * b_dx;
 
-    // Subtract the first guess from our coordinates and do it all again
-    // to gain accuracy
+    // Vector from a_start to b_start
+    let diff_x = b_start[0] - a_start[0];
+    let diff_y = b_start[1] - a_start[1];
 
-    let a_start_h = [
-        a_start[0] - first_guess[0],
-        a_start[1] - first_guess[1],
-        1.0,
-    ];
-    let a_end_h = [a_end[0] - first_guess[0], a_end[1] - first_guess[1], 1.0];
-    let b_start_h = [
-        b_start[0] - first_guess[0],
-        b_start[1] - first_guess[1],
-        1.0,
-    ];
-    let b_end_h = [b_end[0] - first_guess[0], b_end[1] - first_guess[1], 1.0];
-    let a = cross_f32(a_start_h, a_end_h);
-    let b = cross_f32(b_start_h, b_end_h);
-    let intersection_h = cross_f32(a, b);
-    let z_inv = 1. / intersection_h[2];
-    let intersection = [intersection_h[0] * z_inv, intersection_h[1] * z_inv];
+    // Solve for t and u using Cramer's rule
+    let t = (diff_x * b_dy - diff_y * b_dx) / det;
+    let u = (diff_x * a_dy - diff_y * a_dx) / det;
 
-    [
-        first_guess[0] + intersection[0],
-        first_guess[1] + intersection[1],
-    ]
+    (t, u)
 }
 
 #[inline]
@@ -1268,11 +1233,9 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let mid = [0.5, 0.0];
-        assert!(points_coincident_f32(
-            point_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap(),
-            mid,
-            EPSILON_MIN_F32
-        ));
+        let t = t_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap();
+        let reconstructed = pt_on_segment_f32(start, end, t);
+        assert!(points_coincident_f32(reconstructed, mid, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1280,11 +1243,9 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [0.001, 0.0];
-        assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
-            p,
-            EPSILON_MIN_F32,
-        ));
+        let t = t_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap();
+        let reconstructed = pt_on_segment_f32(start, end, t);
+        assert!(points_coincident_f32(reconstructed, p, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1292,11 +1253,9 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [0.999, 0.0];
-        assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
-            p,
-            EPSILON_MIN_F32,
-        ));
+        let t = t_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap();
+        let reconstructed = pt_on_segment_f32(start, end, t);
+        assert!(points_coincident_f32(reconstructed, p, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1304,7 +1263,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [0.5, 0.1];
-        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
+        assert!(t_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -1312,7 +1271,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [1.5, 0.0];
-        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
+        assert!(t_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -1320,7 +1279,7 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [-0.5, 0.0];
-        assert!(point_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
+        assert!(t_on_segment_f32(p, start, end, EPSILON_MIN_F32).is_none());
     }
 
     #[test]
@@ -1328,11 +1287,9 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 1.0];
         let mid = [0.5, 0.5];
-        assert!(points_coincident_f32(
-            point_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap(),
-            mid,
-            EPSILON_MIN_F32,
-        ));
+        let t = t_on_segment_f32(mid, start, end, EPSILON_MIN_F32).unwrap();
+        let reconstructed = pt_on_segment_f32(start, end, t);
+        assert!(points_coincident_f32(reconstructed, mid, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1340,11 +1297,9 @@ mod tests {
         let start = [0.0_f32, 0.0];
         let end = [1.0, 0.0];
         let p = [0.5, 0.000001]; // Very close to the line
-        assert!(points_coincident_f32(
-            point_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap(),
-            p,
-            EPSILON_MIN_F32,
-        ));
+        let t = t_on_segment_f32(p, start, end, EPSILON_MIN_F32).unwrap();
+        let reconstructed = pt_on_segment_f32(start, end, t);
+        assert!(points_coincident_f32(reconstructed, p, EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1354,9 +1309,18 @@ mod tests {
         let b_start = [0.0, 1.0];
         let b_end = [1.0, 0.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let (t, u) = intersect_segments_f32(a_start, a_end, b_start, b_end).unwrap();
+
+        // Verify the intersection point is [0.5, 0.5] from both segments
+        let intersection_from_a = pt_on_segment_f32(a_start, a_end, t);
+        let intersection_from_b = pt_on_segment_f32(b_start, b_end, u);
         assert!(points_coincident_f32(
-            result.unwrap(),
+            intersection_from_a,
+            [0.5, 0.5],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
             [0.5, 0.5],
             EPSILON_MIN_F32
         ));
@@ -1369,9 +1333,18 @@ mod tests {
         let b_start = [0.5, 0.0];
         let b_end = [0.5, 1.0];
 
-        let result = intersect_segments_f32(a_start, a_end, b_start, b_end);
+        let (t, u) = intersect_segments_f32(a_start, a_end, b_start, b_end).unwrap();
+
+        // Verify the intersection point is [0.5, 0.5] from both segments
+        let intersection_from_a = pt_on_segment_f32(a_start, a_end, t);
+        let intersection_from_b = pt_on_segment_f32(b_start, b_end, u);
         assert!(points_coincident_f32(
-            result.unwrap(),
+            intersection_from_a,
+            [0.5, 0.5],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
             [0.5, 0.5],
             EPSILON_MIN_F32
         ));
@@ -1626,8 +1599,11 @@ mod tests {
         let b1 = [0.5, -1.0];
         let b2 = [0.5, 1.0]; // Vertical line through x=0.5
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
-        assert!(points_coincident_f32(result, [0.5, 0.0], EPSILON_MIN_F32));
+        let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
+        let intersection_from_a = pt_on_segment_f32(a1, a2, t);
+        let intersection_from_b = pt_on_segment_f32(b1, b2, u);
+        assert!(points_coincident_f32(intersection_from_a, [0.5, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(intersection_from_b, [0.5, 0.0], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1637,8 +1613,11 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [1.0, 0.0]; // Line y = -x + 1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
-        assert!(points_coincident_f32(result, [0.5, 0.5], EPSILON_MIN_F32));
+        let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
+        let intersection_from_a = pt_on_segment_f32(a1, a2, t);
+        let intersection_from_b = pt_on_segment_f32(b1, b2, u);
+        assert!(points_coincident_f32(intersection_from_a, [0.5, 0.5], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(intersection_from_b, [0.5, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1648,8 +1627,11 @@ mod tests {
         let b1 = [0.0, -1.0];
         let b2 = [0.0, 1.0]; // Vertical line through origin
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
-        assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
+        let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
+        let intersection_from_a = pt_on_segment_f32(a1, a2, t);
+        let intersection_from_b = pt_on_segment_f32(b1, b2, u);
+        assert!(points_coincident_f32(intersection_from_a, [0.0, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(intersection_from_b, [0.0, 0.0], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1661,9 +1643,12 @@ mod tests {
         let b1 = [0.0, 1.0];
         let b2 = [2.0, 0.0];
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
+        let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
         // These lines should intersect at (1, 0.5)
-        assert!(points_coincident_f32(result, [1.0, 0.5], EPSILON_MIN_F32));
+        let intersection_from_a = pt_on_segment_f32(a1, a2, t);
+        let intersection_from_b = pt_on_segment_f32(b1, b2, u);
+        assert!(points_coincident_f32(intersection_from_a, [1.0, 0.5], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(intersection_from_b, [1.0, 0.5], EPSILON_MIN_F32));
     }
 
     #[test]
@@ -1673,7 +1658,10 @@ mod tests {
         let b1 = [-2.0, 2.0];
         let b2 = [2.0, -2.0]; // Line through origin, slope -1
 
-        let result = intersect_lines_f32(a1, a2, b1, b2);
-        assert!(points_coincident_f32(result, [0.0, 0.0], EPSILON_MIN_F32));
+        let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
+        let intersection_from_a = pt_on_segment_f32(a1, a2, t);
+        let intersection_from_b = pt_on_segment_f32(b1, b2, u);
+        assert!(points_coincident_f32(intersection_from_a, [0.0, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(intersection_from_b, [0.0, 0.0], EPSILON_MIN_F32));
     }
 }
