@@ -36,9 +36,18 @@ pub trait KernelF32 {
         end: Self::Vertex,
     ) -> Self::Edge;
 
-    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge);
+    fn split_edge(&mut self, edge: Self::Edge, t: f32, pt: [f32; 2]) -> (Self::Edge, Self::Edge);
 
     fn new_vertex_from_other(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex;
+
+    fn new_cap_edge_from_vertex(
+        &mut self,
+        vertex: Self::Vertex,
+        start: Self::Vertex,
+        end: Self::Vertex,
+        start_t: f32,
+        end_t: f32,
+    ) -> Self::Edge;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -131,7 +140,7 @@ where
         let start_pt = self.pt(start_v);
         let end_pt = self.pt(end_v);
         let pt = pt_on_segment_f32(start_pt, end_pt, t);
-        <Self as KernelF32>::split_edge(self, edge, pt)
+        <Self as KernelF32>::split_edge(self, edge, t, pt)
     }
 
     fn replace_vertex_in_edge(
@@ -329,21 +338,12 @@ where
 
     fn offset_edge_loops(
         &mut self,
-        _edge_loops: &[(u32, Self::Edge)],
-        _offset: Self::OffsetAmount,
-        _cap_style: Self::CapStyle,
-    ) -> Vec<Self::Edge> {
-        todo!();
-    }
-
-    /*
-    fn offset_edge_loops(
-        &mut self,
         edge_loops: &[(u32, Self::Edge)],
         offset: Self::OffsetAmount,
         cap_style: Self::CapStyle,
     ) -> Vec<Self::Edge> {
-        let mut result_edges: Vec<Self::Edge> = vec![];
+        let mut result_edges = vec![];
+        let mut raw_edges = vec![];
 
         fn offset_segment(a_pt: [f32; 2], b_pt: [f32; 2], offset: f32) -> ([f32; 2], [f32; 2]) {
             let offset_x = b_pt[1] - a_pt[1]; // Y
@@ -358,189 +358,215 @@ where
         }
 
         for edge_loop in edge_loops.chunk_by(|(i1, _), (i2, _)| i1 == i2) {
-            let (_, first_original_edge) = edge_loop[edge_loop.len() - 1];
-            let (first_original_edge_start_v, first_original_edge_end_v) =
-                self.vs(first_original_edge);
-            let first_original_edge_start_pt = self.pt(first_original_edge_start_v);
-            let first_original_edge_end_pt = self.pt(first_original_edge_end_v);
-            let (first_offset_edge_start_pt, first_offset_edge_end_pt) = offset_segment(
-                first_original_edge_start_pt,
-                first_original_edge_end_pt,
-                offset,
-            );
-            let first_offset_edge_start_v =
-                self.new_offset_vertex(first_original_edge_start_v, first_offset_edge_start_pt);
+            // Offset each edge
+            raw_edges.clear();
+            for i in 0..edge_loop.len() {
+                let (_, edge) = edge_loop[i];
+                let (edge_start_v, edge_end_v) = self.vs(edge);
+                let edge_start_pt = self.pt(edge_start_v);
+                let edge_end_pt = self.pt(edge_end_v);
+                // OPTIMIZATION:
+                // Check for edge annihilation, which occurs if the segment is offset
+                // beyond the intersection point of its two corner bisectors.
+                // This works out to an offset limit of L / (tan(a/2) + tan(b/2))
+                // where a and b are the corner angles and L is the segment length.
+                // This can be rewritten as L * (cos(a) + 1.) * (cos(b) + 1.) /
+                // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a))
+                // which can then be expressed using dot & cross products.
+                {
+                    let (_, prev_edge) = edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
+                    let (prev_edge_start_v, _) = self.vs(prev_edge);
+                    let (_, next_edge) = edge_loop[(i + 1) % edge_loop.len()];
+                    let (_, next_edge_end_v) = self.vs(next_edge);
+                    let pt1 = self.pt(prev_edge_start_v);
+                    let pt2 = edge_start_pt;
+                    let pt3 = edge_end_pt;
+                    let pt4 = self.pt(next_edge_end_v);
+                    let l12 = [pt2[0] - pt1[0], pt2[1] - pt1[1]];
+                    let l23 = [pt3[0] - pt2[0], pt3[1] - pt2[1]];
+                    let l34 = [pt4[0] - pt3[0], pt4[1] - pt3[1]];
+                    let a_dot = l12[0] * l23[0] + l12[1] * l23[1];
+                    let mut a_cross = l12[0] * l23[1] - l12[1] * l23[0];
+                    let b_dot = l23[0] * l34[0] + l23[1] * l34[1];
+                    let mut b_cross = l23[0] * l34[1] - l23[1] * l34[0];
 
-            let mut prev_offset_edge_start_v = first_offset_edge_start_v;
-            let mut prev_offset_edge_start_pt = first_offset_edge_start_pt;
-            let mut prev_offset_edge_end_pt = first_offset_edge_end_pt;
-
-            for (i, &(_, original_edge)) in edge_loop[0..].iter().enumerate() {
-                let (original_edge_start_v, original_edge_end_v) = self.vs(original_edge);
-                let original_edge_start_pt = self.pt(original_edge_start_v);
-                let original_edge_end_pt = self.pt(original_edge_end_v);
-                let offset_edge_start_pt;
-                let offset_edge_end_pt;
-                let offset_edge_start_v;
-                let prev_offset_edge_end_v;
-                if i < edge_loop.len() - 1 {
-                    // OPTIMIZATION:
-                    // Check for edge annihilation, which occurs if the segment is offset
-                    // beyond the intersection point of its two corner bisectors.
-                    // This works out to an offset limit of L / (tan(a/2) + tan(b/2))
-                    // where a and b are the corner angles and L is the segment length.
-                    // This can be rewritten as L * (cos(a) + 1.) * (cos(b) + 1.) /
-                    // ((cos(a) + 1.) * sin(b) + (cos(b) + 1.) * sin(a))
-                    // which can then be expressed using dot & cross products.
-                    {
-                        let (_, prev_edge) = edge_loop[(i + edge_loop.len() - 1) % edge_loop.len()];
-                        let (prev_edge_start_v, _) = self.vs(prev_edge);
-                        let (_, next_edge) = edge_loop[(i + 1) % edge_loop.len()];
-                        let (_, next_edge_end_v) = self.vs(prev_edge);
-                        let pt1 = self.pt(prev_edge_start_v);
-                        let pt2 = original_edge_start_pt;
-                        let pt3 = original_edge_end_pt;
-                        let pt4 = self.pt(next_edge_end_v);
-                        let l12 = [pt2[0] - pt1[0], pt2[1] - pt1[1]];
-                        let l23 = [pt3[0] - pt2[0], pt3[1] - pt2[1]];
-                        let l34 = [pt4[0] - pt3[0], pt4[1] - pt3[1]];
-                        let a_dot = l12[0] * l23[0] + l12[1] * l23[1];
-                        let mut a_cross = l12[0] * l23[1] - l12[1] * l23[0];
-                        let b_dot = l23[0] * l34[0] + l23[1] * l34[1];
-                        let mut b_cross = l23[0] * l34[1] - l23[1] * l34[0];
-
-                        // Negate the angles based on the offset direction
-                        if offset > 0. {
-                            a_cross = -a_cross;
-                            b_cross = -b_cross;
-                        }
-
-                        // Both corner angles must be concave
-                        // in the direction of the offset
-                        if a_cross > 0. && b_cross > 0. {
-                            let len12 = l12[0].hypot(l12[1]);
-                            let len23 = l23[0].hypot(l23[1]);
-                            let len34 = l34[0].hypot(l34[1]);
-
-                            // Compute sine and cosine using dot and cross product.
-                            // To avoid division, both the numerator and denominator
-                            // will have a common factor of len12 * len23 ^ 2 * len34
-                            let a_cos_plus_1 = a_dot + len12 * len23;
-                            let a_sin = a_cross;
-                            let b_cos_plus_1 = b_dot + len23 * len34;
-                            let b_sin = b_cross;
-
-                            // Rearrange the inequality to avoid division
-                            // (numerator and denominator are both always positive)
-                            if len23 * a_cos_plus_1 * b_cos_plus_1
-                                < offset.abs() * (a_cos_plus_1 * b_sin + b_cos_plus_1 * a_sin)
-                            {
-                                // Annihilate
-                                continue;
-                            }
-                        }
+                    // Negate the angles based on the offset direction
+                    if offset > 0. {
+                        a_cross = -a_cross;
+                        b_cross = -b_cross;
                     }
 
-                    // Offset the edge
-                    (offset_edge_start_pt, offset_edge_end_pt) =
-                        offset_segment(original_edge_start_pt, original_edge_end_pt, offset);
+                    // Both corner angles must be concave
+                    // in the direction of the offset
+                    if a_cross > 0. && b_cross > 0. {
+                        let len12 = l12[0].hypot(l12[1]);
+                        let len23 = l23[0].hypot(l23[1]);
+                        let len34 = l34[0].hypot(l34[1]);
 
-                    // TODO: Create the actual Edge and the two Vertices
-                    // so that we can re-use the cleaning intersection routines
+                        // Compute sine and cosine using dot and cross product.
+                        // To avoid division, both the numerator and denominator
+                        // will have a common factor of len12 * len23 ^ 2 * len34
+                        let a_cos_plus_1 = a_dot + len12 * len23;
+                        let a_sin = a_cross;
+                        let b_cos_plus_1 = b_dot + len23 * len34;
+                        let b_sin = b_cross;
 
-                    // OPTIMIZATION:
-                    // Check for intersection with the previous segment,
-                    // to save the cleaning / clipping steps some work.
-                    if let Some(intersection) = intersect_segments_f32(
-                        prev_offset_edge_start_pt,
-                        prev_offset_edge_end_pt,
-                        offset_edge_start_pt,
-                        offset_edge_end_pt,
-                    ) {
-                        // Segments do intersect
-                        // 1. trim them and output the previous segment
-                        let intersection_v = self.new_vertex(intersection);
-                        result_edges.push((prev_offset_edge_start_v, intersection_v));
-                        // 2. update the state & continue
-                        prev_offset_edge_start_v = intersection_v;
-                        prev_offset_edge_start_pt = intersection;
-                        prev_offset_edge_end_pt = offset_edge_end_pt;
-                        continue;
+                        // Rearrange the inequality to avoid division
+                        // (numerator and denominator are both always positive)
+                        if len23 * a_cos_plus_1 * b_cos_plus_1
+                            < offset.abs() * (a_cos_plus_1 * b_sin + b_cos_plus_1 * a_sin)
+                        {
+                            // Annihilate
+                            continue;
+                        }
                     }
-
-                    // Now we know the offset segments don't intersect
-                    // 1. output the full previous segment
-                    prev_offset_edge_end_v = self.new_vertex(prev_offset_edge_end_pt);
-                    result_edges.push((prev_offset_edge_start_v, prev_offset_edge_end_v));
-
-                    // 2. lock in this segment's start point
-                    offset_edge_start_v = self.new_vertex(offset_edge_start_pt);
-                } else {
-                    // For joining back to the start, we will always output the full previous segment
-                    prev_offset_edge_end_v = self.new_vertex(prev_offset_edge_end_pt);
-                    result_edges.push((prev_offset_edge_start_v, prev_offset_edge_end_v));
-
-                    offset_edge_start_v = first_offset_edge_start_v;
-                    offset_edge_start_pt = first_offset_edge_start_pt;
-                    offset_edge_end_pt = first_offset_edge_end_pt;
                 }
 
-                // Now we see if this corner is concave or convex
-                if matches!(
+                // Offset the edge and push it to raw_edges
+                let (offset_edge_start_pt, offset_edge_end_pt) =
+                    offset_segment(edge_start_pt, edge_end_pt, offset);
+                let offset_edge_start_v =
+                    self.new_vertex_from_other(edge_start_v, offset_edge_start_pt);
+                let offset_edge_end_v = self.new_vertex_from_other(edge_end_v, offset_edge_end_pt);
+                let offset_edge =
+                    self.new_edge_from_other(edge, offset_edge_start_v, offset_edge_end_v);
+                raw_edges.push((edge, offset_edge));
+            }
+
+            // OPTIMIZATION:
+            // Check each pair of offset edges for intersection
+            // to save the cleaning / clipping steps some work.
+            for prev_i in 0..raw_edges.len() {
+                let next_i = (prev_i + 1) % raw_edges.len();
+                let (prev_edge, prev_offset_edge) = raw_edges[prev_i];
+                let (next_edge, next_offset_edge) = raw_edges[next_i];
+                let (prev_offset_edge_start_v, prev_offset_edge_end_v) = self.vs(prev_offset_edge);
+                let prev_offset_edge_start_pt = self.pt(prev_offset_edge_start_v);
+                let prev_offset_edge_end_pt = self.pt(prev_offset_edge_end_v);
+                let (next_offset_edge_start_v, next_offset_edge_end_v) = self.vs(next_offset_edge);
+                let next_offset_edge_start_pt = self.pt(next_offset_edge_start_v);
+                let next_offset_edge_end_pt = self.pt(next_offset_edge_end_v);
+
+                let Some((t1, t2)) = intersect_segments_f32(
+                    prev_offset_edge_start_pt,
+                    prev_offset_edge_end_pt,
+                    next_offset_edge_start_pt,
+                    next_offset_edge_end_pt,
+                ) else {
+                    continue;
+                };
+                // Segments do intersect
+
+                let (prev_offset_edge_shortened, _) =
+                    <Self as Kernel>::split_edge(self, prev_offset_edge, t1);
+                let split_vertex_a = self
+                    .vertices_for_edge(prev_offset_edge_shortened)
+                    .unwrap()
+                    .1;
+
+                let (_, next_offset_edge_shortened) =
+                    <Self as Kernel>::split_edge(self, next_offset_edge, t2);
+                let split_vertex_b = self
+                    .vertices_for_edge(next_offset_edge_shortened)
+                    .unwrap()
+                    .0;
+
+                let intersection_v =
+                    <Self as Kernel>::merge_vertices(self, split_vertex_a, split_vertex_b);
+
+                let prev_offset_edge_shortened = self
+                    .replace_vertex_in_edge(
+                        prev_offset_edge_shortened,
+                        split_vertex_a,
+                        intersection_v,
+                    )
+                    .unwrap();
+                let next_offset_edge_shortened = self
+                    .replace_vertex_in_edge(
+                        next_offset_edge_shortened,
+                        split_vertex_b,
+                        intersection_v,
+                    )
+                    .unwrap();
+
+                raw_edges[prev_i] = (prev_edge, prev_offset_edge_shortened);
+                raw_edges[next_i] = (next_edge, next_offset_edge_shortened);
+            }
+
+            // Restore topology by iterating over each corner
+            // and adding a cap if necessary
+            for prev_i in 0..raw_edges.len() {
+                let next_i = (prev_i + 1) % raw_edges.len();
+                let (prev_edge, prev_offset_edge) = raw_edges[prev_i];
+                let (_next_edge, next_offset_edge) = raw_edges[next_i];
+
+                result_edges.push(prev_offset_edge);
+
+                let (prev_offset_edge_start_v, prev_offset_edge_end_v) = self.vs(prev_offset_edge);
+                let (next_offset_edge_start_v, next_offset_edge_end_v) = self.vs(next_offset_edge);
+
+                // If this corner is already connected, there is nothing to do
+                if prev_offset_edge_end_v == next_offset_edge_start_v {
+                    continue;
+                }
+
+                let prev_offset_edge_start_pt = self.pt(prev_offset_edge_start_v);
+                let prev_offset_edge_end_pt = self.pt(prev_offset_edge_end_v);
+                let next_offset_edge_start_pt = self.pt(next_offset_edge_start_v);
+                let next_offset_edge_end_pt = self.pt(next_offset_edge_end_v);
+
+                let (_, original_v) = self.vs(prev_edge);
+                // Could also have done (original_v, _) = self.vs(next_edge);
+                // These should be equal, unless an intermediate edge was annihilated,
+                // in which case we are dealing with a concave corner
+                // and expect this cap to be clipped away.
+
+                let original_pt = self.pt(original_v);
+
+                let fp_mag = fp_mag_pt_f32(prev_offset_edge_end_pt)
+                    .max(fp_mag_pt_f32(next_offset_edge_start_pt))
+                    .max(fp_mag_pt_f32(original_pt));
+
+                // If the two vertices are coincident,
+                // or the corner is concave,
+                // cap the corner with a straight line
+                // (simple & topology-preserving.)
+                // Given the annihilation step, I believe this is sufficient to guarantee a correct result.
+                if points_coincident_f32(
+                    prev_offset_edge_end_pt,
+                    next_offset_edge_start_pt,
+                    self.epsilon(fp_mag),
+                ) || matches!(
                     (
                         sin_cmp_f32(
-                            original_edge_start_pt,
+                            original_pt,
                             prev_offset_edge_end_pt,
-                            offset_edge_start_pt
+                            next_offset_edge_start_pt
                         ),
                         offset >= 0.
                     ),
                     (Ordering::Greater, true) | (Ordering::Less, false)
                 ) {
-                    // For a concave corner, draw a line between the two segments
-                    // Given the annihilation step,
-                    // I believe this is sufficient to guarantee a correct result.
-                    result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
+                    result_edges.push(self.new_cap_edge_from_vertex(
+                        original_v,
+                        prev_offset_edge_end_v,
+                        next_offset_edge_start_v,
+                        0.,
+                        1.,
+                    ));
 
-                    // Update state & continue
-                    prev_offset_edge_start_v = offset_edge_start_v;
-                    prev_offset_edge_start_pt = offset_edge_start_pt;
-                    prev_offset_edge_end_pt = offset_edge_end_pt;
                     continue;
                 }
 
-                // Now we know the corner is convex
-
-                // If the two vertices are coincident, connect them with a bevel
-                // (simple & topology-preserving)
-                let fp_mag = fp_mag_pt_f32(prev_offset_edge_end_pt)
-                    .max(fp_mag_pt_f32(offset_edge_start_pt))
-                    .max(fp_mag_pt_f32(original_edge_start_pt));
-
-                if points_coincident_f32(
-                    prev_offset_edge_end_pt,
-                    offset_edge_start_pt,
-                    self.epsilon(fp_mag),
-                ) {
-                    result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
-
-                    // Update state & continue
-                    prev_offset_edge_start_v = offset_edge_start_v;
-                    prev_offset_edge_start_pt = offset_edge_start_pt;
-                    prev_offset_edge_end_pt = offset_edge_end_pt;
-                    continue;
-                }
-
-                // Now we know the vertices are not coincident
-
-                // Apply a cap
+                // Now we know we are dealing with a convex corner
+                // that needs a cap.
                 match cap_style {
                     CapStyleF32::Arc { tolerance } => {
                         // Calculate vectors from center to both points
-                        let dx_a = prev_offset_edge_end_pt[0] - original_edge_start_pt[0];
-                        let dy_a = prev_offset_edge_end_pt[1] - original_edge_start_pt[1];
-                        let dx_b = offset_edge_start_pt[0] - original_edge_start_pt[0];
-                        let dy_b = offset_edge_start_pt[1] - original_edge_start_pt[1];
+                        let dx_a = prev_offset_edge_end_pt[0] - original_pt[0];
+                        let dy_a = prev_offset_edge_end_pt[1] - original_pt[1];
+                        let dx_b = next_offset_edge_start_pt[0] - original_pt[0];
+                        let dy_b = next_offset_edge_start_pt[1] - original_pt[1];
 
                         // Calculate the angle between the two vectors
                         let cross = dx_a * dy_b - dy_a * dx_b; // 2D cross product (z-component)
@@ -558,35 +584,67 @@ where
 
                         // Interpolate the arc
                         let mut prev_vertex = prev_offset_edge_end_v;
-                        let factor = delta_angle / num_segments as f32;
+                        let mut prev_t = 0.;
+                        let inv_num_segments = 1. / num_segments as f32;
                         for i in 1..num_segments {
-                            let theta = i as f32 * factor;
+                            let t = i as f32 * inv_num_segments;
+                            let theta = t * delta_angle;
                             let c = theta.cos();
                             let s = theta.sin();
                             // Rotate [dx_a, dy_a] by theta
                             let dx = c * dx_a - s * dy_a;
                             let dy = s * dx_a + c * dy_a;
-                            let v = self.new_vertex([
-                                original_edge_start_pt[0] + dx,
-                                original_edge_start_pt[1] + dy,
-                            ]);
-                            result_edges.push((prev_vertex, v));
+                            let v = self.new_vertex_from_other(
+                                original_v,
+                                [original_pt[0] + dx, original_pt[1] + dy],
+                            );
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                prev_vertex,
+                                v,
+                                prev_t,
+                                t,
+                            ));
                             prev_vertex = v;
+                            prev_t = t;
                         }
-                        result_edges.push((prev_vertex, offset_edge_start_v));
+                        result_edges.push(self.new_cap_edge_from_vertex(
+                            original_v,
+                            prev_vertex,
+                            next_offset_edge_start_v,
+                            prev_t,
+                            1.,
+                        ));
                     }
                     CapStyleF32::Bevel => {
-                        result_edges.push((prev_offset_edge_end_v, offset_edge_start_v));
+                        result_edges.push(self.new_cap_edge_from_vertex(
+                            original_v,
+                            prev_offset_edge_end_v,
+                            next_offset_edge_start_v,
+                            0.,
+                            1.,
+                        ));
                     }
                     CapStyleF32::Miter { limit } => {
                         let limit = limit * offset.abs();
 
-                        let miter_pt = intersect_lines_f32(
+                        let (miter_t_a, miter_t_b) = intersect_lines_f32(
                             prev_offset_edge_start_pt,
                             prev_offset_edge_end_pt,
-                            offset_edge_start_pt,
-                            offset_edge_end_pt,
+                            next_offset_edge_start_pt,
+                            next_offset_edge_end_pt,
                         );
+                        let miter_pt_a = pt_on_segment_f32(
+                            prev_offset_edge_start_pt,
+                            prev_offset_edge_end_pt,
+                            miter_t_a,
+                        );
+                        let miter_pt_b = pt_on_segment_f32(
+                            next_offset_edge_start_pt,
+                            next_offset_edge_end_pt,
+                            miter_t_b,
+                        );
+                        let miter_pt = merge_points_f32(miter_pt_a, miter_pt_b);
                         let d_a = [
                             miter_pt[0] - prev_offset_edge_end_pt[0],
                             miter_pt[1] - prev_offset_edge_end_pt[1],
@@ -594,12 +652,24 @@ where
                         let d_a_sq = d_a[0] * d_a[0] + d_a[1] * d_a[1];
                         if d_a_sq < limit * limit {
                             // Emit a true miter
-                            let miter_v = self.new_vertex(miter_pt);
-                            result_edges.push((prev_offset_edge_end_v, miter_v));
-                            result_edges.push((miter_v, offset_edge_start_v));
+                            let miter_v = self.new_vertex_from_other(original_v, miter_pt);
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                prev_offset_edge_end_v,
+                                miter_v,
+                                0.,
+                                0.5,
+                            ));
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                miter_v,
+                                next_offset_edge_start_v,
+                                0.5,
+                                1.,
+                            ));
                         } else {
                             // Emit a clipped miter
-                            // Extended edges `a` and `b` by `limit`
+                            // Extend edges `a` and `b` by `limit`
 
                             let a_vec = [
                                 prev_offset_edge_end_pt[0] - prev_offset_edge_start_pt[0],
@@ -611,35 +681,54 @@ where
                                 prev_offset_edge_end_pt[0] + a_vec[0] * a_factor,
                                 prev_offset_edge_end_pt[1] + a_vec[1] * a_factor,
                             ];
-                            let extended_a_vertex = self.new_vertex(extended_a_pt);
+                            let extended_a_v =
+                                self.new_vertex_from_other(original_v, extended_a_pt);
 
                             let b_vec = [
-                                offset_edge_start_pt[0] - offset_edge_end_pt[0],
-                                offset_edge_start_pt[1] - offset_edge_end_pt[1],
+                                next_offset_edge_start_pt[0] - next_offset_edge_end_pt[0],
+                                next_offset_edge_start_pt[1] - next_offset_edge_end_pt[1],
                             ];
                             let b_len = b_vec[0].hypot(b_vec[1]);
                             let b_factor = limit / b_len;
                             let extended_b_pt = [
-                                offset_edge_start_pt[0] + b_vec[0] * b_factor,
-                                offset_edge_start_pt[1] + b_vec[1] * b_factor,
+                                next_offset_edge_start_pt[0] + b_vec[0] * b_factor,
+                                next_offset_edge_start_pt[1] + b_vec[1] * b_factor,
                             ];
-                            let extended_b_vertex = self.new_vertex(extended_b_pt);
+                            let extended_b_v =
+                                self.new_vertex_from_other(original_v, extended_b_pt);
 
-                            result_edges.push((prev_offset_edge_end_v, extended_a_vertex));
-                            result_edges.push((extended_a_vertex, extended_b_vertex));
-                            result_edges.push((extended_b_vertex, offset_edge_start_v));
+                            let clipped_segment_length = (extended_b_pt[0] - extended_a_pt[0])
+                                .hypot(extended_b_pt[1] - extended_a_pt[1]);
+                            let miter_fraction = limit / (2. * limit + clipped_segment_length);
+
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                prev_offset_edge_end_v,
+                                extended_a_v,
+                                0.,
+                                miter_fraction,
+                            ));
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                extended_a_v,
+                                extended_b_v,
+                                miter_fraction,
+                                1. - miter_fraction,
+                            ));
+                            result_edges.push(self.new_cap_edge_from_vertex(
+                                original_v,
+                                extended_b_v,
+                                next_offset_edge_start_v,
+                                1. - miter_fraction,
+                                1.,
+                            ));
                         }
                     }
                 }
-                // Update state & continue
-                prev_offset_edge_start_v = offset_edge_start_v;
-                prev_offset_edge_start_pt = offset_edge_start_pt;
-                prev_offset_edge_end_pt = offset_edge_end_pt;
             }
         }
         result_edges
     }
-    */
 }
 
 #[repr(transparent)]
@@ -731,12 +820,23 @@ impl KernelF32 for DirectKernelF32 {
         (start, end)
     }
 
-    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, _t: f32, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         ((edge.0, pt.into()), (pt.into(), edge.1))
     }
 
     fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
         pt.into()
+    }
+
+    fn new_cap_edge_from_vertex(
+        &mut self,
+        _vertex: Self::Vertex,
+        start: Self::Vertex,
+        end: Self::Vertex,
+        _start_t: f32,
+        _end_t: f32,
+    ) -> Self::Edge {
+        (start, end)
     }
 }
 
@@ -786,13 +886,24 @@ impl KernelF32 for BasicKernelF32 {
         (start, end)
     }
 
-    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, _t: f32, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         let v = self.insert_vertex(pt);
         ((edge.0, v), (v, edge.1))
     }
 
     fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
         self.insert_vertex(pt)
+    }
+
+    fn new_cap_edge_from_vertex(
+        &mut self,
+        _vertex: Self::Vertex,
+        start: Self::Vertex,
+        end: Self::Vertex,
+        _start_t: f32,
+        _end_t: f32,
+    ) -> Self::Edge {
+        (start, end)
     }
 }
 
@@ -847,13 +958,24 @@ impl KernelF32 for BasicKernelF32WithCustomEpsilon {
         (start, end)
     }
 
-    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
+    fn split_edge(&mut self, edge: Self::Edge, _t: f32, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
         let v = self.insert_vertex(pt);
         ((edge.0, v), (v, edge.1))
     }
 
     fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
         self.insert_vertex(pt)
+    }
+
+    fn new_cap_edge_from_vertex(
+        &mut self,
+        _vertex: Self::Vertex,
+        start: Self::Vertex,
+        end: Self::Vertex,
+        _start_t: f32,
+        _end_t: f32,
+    ) -> Self::Edge {
+        (start, end)
     }
 }
 
@@ -881,6 +1003,15 @@ fn average_colors(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
         0.5 * (a[1] + b[1]),
         0.5 * (a[2] + b[2]),
         0.5 * (a[3] + b[3]),
+    ]
+}
+
+fn weighted_average_colors(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
+    [
+        (1. - t) * a[0] + t * b[0],
+        (1. - t) * a[1] + t * b[1],
+        (1. - t) * a[2] + t * b[2],
+        (1. - t) * a[3] + t * b[3],
     ]
 }
 
@@ -918,13 +1049,27 @@ impl KernelF32 for ColorKernelF32 {
         (start, end)
     }
 
-    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
-        let v = self.insert_vertex(pt, self.color(edge.0)); // XXX blend color
+    fn split_edge(&mut self, edge: Self::Edge, t: f32, pt: [f32; 2]) -> (Self::Edge, Self::Edge) {
+        let v = self.insert_vertex(
+            pt,
+            weighted_average_colors(self.color(edge.0), self.color(edge.1), t),
+        );
         ((edge.0, v), (v, edge.1))
     }
 
     fn new_vertex_from_other(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
         self.insert_vertex(pt, self.color(v))
+    }
+
+    fn new_cap_edge_from_vertex(
+        &mut self,
+        _vertex: Self::Vertex,
+        start: Self::Vertex,
+        end: Self::Vertex,
+        _start_t: f32,
+        _end_t: f32,
+    ) -> Self::Edge {
+        (start, end)
     }
 }
 
@@ -1154,39 +1299,20 @@ fn intersect_lines_f32(
     b_start: [f32; 2],
     b_end: [f32; 2],
 ) -> (f32, f32) {
-    // Given two lines defined by a starting point and an ending point,
-    // return the two parameter values (t, u) of the intersection
-    // where t=0 represents the starting point, and t=1 is the ending point.
+    let da = [a_end[0] - a_start[0], a_end[1] - a_start[1]];
+    let db = [b_end[0] - b_start[0], b_end[1] - b_start[1]];
 
-    // Line a: P = a_start + t * (a_end - a_start)
-    // Line b: Q = b_start + u * (b_end - b_start)
-
-    let a_dx = a_end[0] - a_start[0];
-    let a_dy = a_end[1] - a_start[1];
-    let b_dx = b_end[0] - b_start[0];
-    let b_dy = b_end[1] - b_start[1];
-
-    // Cross product of direction vectors (determinant)
-    let det = a_dx * b_dy - a_dy * b_dx;
+    // Inverse of the determinant
+    let inv_det = 1. / (da[0] * db[1] - da[1] * db[0]);
 
     // Vector from a_start to b_start
-    let diff_x = b_start[0] - a_start[0];
-    let diff_y = b_start[1] - a_start[1];
+    let diff = [b_start[0] - a_start[0], b_start[1] - a_start[1]];
 
     // Solve for t and u using Cramer's rule
-    let t = (diff_x * b_dy - diff_y * b_dx) / det;
-    let u = (diff_x * a_dy - diff_y * a_dx) / det;
+    let t = inv_det * (diff[0] * db[1] - diff[1] * db[0]);
+    let u = inv_det * (diff[0] * da[1] - diff[1] * da[0]);
 
     (t, u)
-}
-
-#[inline]
-fn cross_f32(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
-    [
-        a[1] * b[2] - a[2] * b[1],
-        a[2] * b[0] - a[0] * b[2],
-        a[0] * b[1] - a[1] * b[0],
-    ]
 }
 
 #[inline]
@@ -1602,8 +1728,16 @@ mod tests {
         let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
         let intersection_from_a = pt_on_segment_f32(a1, a2, t);
         let intersection_from_b = pt_on_segment_f32(b1, b2, u);
-        assert!(points_coincident_f32(intersection_from_a, [0.5, 0.0], EPSILON_MIN_F32));
-        assert!(points_coincident_f32(intersection_from_b, [0.5, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(
+            intersection_from_a,
+            [0.5, 0.0],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
+            [0.5, 0.0],
+            EPSILON_MIN_F32
+        ));
     }
 
     #[test]
@@ -1616,8 +1750,16 @@ mod tests {
         let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
         let intersection_from_a = pt_on_segment_f32(a1, a2, t);
         let intersection_from_b = pt_on_segment_f32(b1, b2, u);
-        assert!(points_coincident_f32(intersection_from_a, [0.5, 0.5], EPSILON_MIN_F32));
-        assert!(points_coincident_f32(intersection_from_b, [0.5, 0.5], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(
+            intersection_from_a,
+            [0.5, 0.5],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
+            [0.5, 0.5],
+            EPSILON_MIN_F32
+        ));
     }
 
     #[test]
@@ -1630,8 +1772,16 @@ mod tests {
         let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
         let intersection_from_a = pt_on_segment_f32(a1, a2, t);
         let intersection_from_b = pt_on_segment_f32(b1, b2, u);
-        assert!(points_coincident_f32(intersection_from_a, [0.0, 0.0], EPSILON_MIN_F32));
-        assert!(points_coincident_f32(intersection_from_b, [0.0, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(
+            intersection_from_a,
+            [0.0, 0.0],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
+            [0.0, 0.0],
+            EPSILON_MIN_F32
+        ));
     }
 
     #[test]
@@ -1647,8 +1797,16 @@ mod tests {
         // These lines should intersect at (1, 0.5)
         let intersection_from_a = pt_on_segment_f32(a1, a2, t);
         let intersection_from_b = pt_on_segment_f32(b1, b2, u);
-        assert!(points_coincident_f32(intersection_from_a, [1.0, 0.5], EPSILON_MIN_F32));
-        assert!(points_coincident_f32(intersection_from_b, [1.0, 0.5], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(
+            intersection_from_a,
+            [1.0, 0.5],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
+            [1.0, 0.5],
+            EPSILON_MIN_F32
+        ));
     }
 
     #[test]
@@ -1661,7 +1819,15 @@ mod tests {
         let (t, u) = intersect_lines_f32(a1, a2, b1, b2);
         let intersection_from_a = pt_on_segment_f32(a1, a2, t);
         let intersection_from_b = pt_on_segment_f32(b1, b2, u);
-        assert!(points_coincident_f32(intersection_from_a, [0.0, 0.0], EPSILON_MIN_F32));
-        assert!(points_coincident_f32(intersection_from_b, [0.0, 0.0], EPSILON_MIN_F32));
+        assert!(points_coincident_f32(
+            intersection_from_a,
+            [0.0, 0.0],
+            EPSILON_MIN_F32
+        ));
+        assert!(points_coincident_f32(
+            intersection_from_b,
+            [0.0, 0.0],
+            EPSILON_MIN_F32
+        ));
     }
 }
