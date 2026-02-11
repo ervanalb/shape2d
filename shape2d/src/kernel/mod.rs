@@ -10,10 +10,8 @@ pub trait Kernel: Sized {
     type Vertex: Copy + Ord + Debug;
     type Edge: Edge;
     type Extents;
-    type MergePoint;
     type MergeCurve;
-    type SplitPoint;
-    type IntersectionPoint;
+    type Point: Clone;
     type SweepLineEdgePortion: Copy + PartialEq + Debug;
     type SweepLineEventPoint: Copy + PartialEq + Debug;
     type TriangleKernel: TriangleKernel;
@@ -21,10 +19,10 @@ pub trait Kernel: Sized {
     type OffsetAmount: Copy + Debug;
 
     /// Check if two vertices are coincident (at the same location)
-    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::MergePoint>;
+    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::Point>;
 
     /// Check if two edges are coincident (fully overlap.)
-    /// These edges must already share all of their vertices
+    /// Preconditions: These edges must already share all of their vertices
     /// and not be equal (or opposite)
     fn edges_coincident(
         &self,
@@ -34,24 +32,34 @@ pub trait Kernel: Sized {
 
     /// Check if this vertex lies on the edge from edge_start to edge_end,
     /// and if so, return the point on the edge nearest to the vertex
-    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::SplitPoint>;
+    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point>;
 
     /// See if two edges intersect
-    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::IntersectionPoint>;
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point>;
 
     /// Merge two vertices, returning the merged result
-    fn merge_vertices(&mut self, pt: Self::MergePoint) -> Self::Vertex;
+    fn merge_vertices(
+        &mut self,
+        a: Self::Vertex,
+        b: Self::Vertex,
+        pt: Self::Point,
+    ) -> Self::Vertex;
 
     /// Merge two edges, returning the merged result.
-    fn merge_edges(&mut self, curve: Self::MergeCurve) -> Self::Edge;
+    fn merge_edges(
+        &mut self,
+        a: Self::Edge,
+        b: Self::Edge,
+        coincidence: EdgeCoincidence,
+        curve: Self::MergeCurve,
+    ) -> Self::Edge;
 
-    /// Split an edge at the given point, returning the new edges.
+    /// Split an edge at the given point, returning the two new edges.
     /// This is called twice for intersections.
     fn split_edge(
         &mut self,
         edge: Self::Edge,
-        vertex: Self::Vertex,
-        pt: Self::SplitPoint,
+        pt: Self::Point,
     ) -> (Self::Edge, Self::Edge);
 
     /// Generate an "extents" object from a list of edges,
@@ -80,10 +88,6 @@ pub trait Kernel: Sized {
         old_v: Self::Vertex,
         new_v: Self::Vertex,
     ) -> Option<Self::Edge>;
-
-    // Splits an edge at the given vertex, returning two new edges
-    // `vertex` must not be equal to or coincident with an endpoint already on `edge`
-    fn split_edge(&self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge);
 
     fn sweep_line_events_for_edge(
         &self,

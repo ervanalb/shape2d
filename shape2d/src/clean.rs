@@ -30,7 +30,7 @@ enum Action<K: Kernel> {
     MergeVertices {
         v1: K::Vertex,
         v2: K::Vertex,
-        pt: K::MergePoint,
+        pt: K::Point,
     },
     /// Merge two coincident edges
     MergeEdges {
@@ -43,13 +43,13 @@ enum Action<K: Kernel> {
     SplitEdge {
         edge: K::Edge,
         split_vertex: K::Vertex,
-        pt: K::SplitPoint,
+        pt: K::Point,
     },
     /// Split both edges at their intersection point
     SplitBothEdges {
         e1: K::Edge,
         e2: K::Edge,
-        pt: K::IntersectionPoint,
+        pt: K::Point,
     },
 }
 
@@ -417,7 +417,7 @@ impl<K: Kernel> SpatialIndex<K> {
                 }
                 Action::MergeVertices { v1, v2, pt } => {
                     // Add merged vertex as a new vertex
-                    let merged_vertex = kernel.merge_vertices(pt);
+                    let merged_vertex = kernel.merge_vertices(v1, v2, pt);
 
                     // Update all edges referencing v1 or v2
                     for v in [v1, v2] {
@@ -448,7 +448,7 @@ impl<K: Kernel> SpatialIndex<K> {
                     curve,
                 } => {
                     // Construct merged edge
-                    let new_e = kernel.merge_edges(curve);
+                    let new_e = kernel.merge_edges(e1, e2, coincidence, curve);
 
                     // Remove old edges
                     let old_e1 = self.remove(kernel, e1);
@@ -498,24 +498,38 @@ impl<K: Kernel> SpatialIndex<K> {
                     split_vertex: old_split_vertex,
                     pt,
                 } => {
-                    // Add split point as a new vertex
-                    let new_split_vertex = kernel.new_split_vertex(pt);
+                    // Split the edge
+                    let (new_e1, new_e2) = kernel.split_edge(edge, pt.clone());
+
+                    let new_split_vertex = kernel.vertices_for_edge(new_e1).unwrap().1;
+                    // Edges should meet at a common point:
+                    assert_eq!(
+                        new_split_vertex,
+                        kernel.vertices_for_edge(new_e2).unwrap().0
+                    );
+
+                    let merged_vertex =
+                        kernel.merge_vertices(old_split_vertex, new_split_vertex, pt);
+
+                    let new_e1 = kernel
+                        .replace_vertex_in_edge(new_e1, new_split_vertex, merged_vertex)
+                        .unwrap();
+                    let new_e2 = kernel
+                        .replace_vertex_in_edge(new_e2, new_split_vertex, merged_vertex)
+                        .unwrap();
 
                     // Update all edges referencing old_split_vertex
                     while let Some(edge) = { self.edges_for_vertex(old_split_vertex).next() } {
                         let new_edge = edge;
                         let old = self.remove(kernel, edge);
-                        if let Some(new_edge) = kernel.replace_vertex_in_edge(
-                            new_edge,
-                            old_split_vertex,
-                            new_split_vertex,
-                        ) {
+                        if let Some(new_edge) =
+                            kernel.replace_vertex_in_edge(new_edge, old_split_vertex, merged_vertex)
+                        {
                             self.insert(kernel, new_edge, old.hilbert_value, old.multiplicity);
                         }
                     }
 
-                    // Split the edge
-                    let (new_e1, new_e2) = kernel.split_edge(edge, new_split_vertex);
+                    // Remove old edge and insert new edge
                     let old = self.remove(kernel, edge);
                     self.insert(kernel, new_e1, old.hilbert_value, old.multiplicity);
                     self.insert(kernel, new_e2, old.hilbert_value, old.multiplicity);
@@ -525,9 +539,32 @@ impl<K: Kernel> SpatialIndex<K> {
                     e2: edge_b,
                     pt,
                 } => {
-                    let vertex = kernel.new_intersection_vertex(pt);
-                    let (edge_a1, edge_a2) = kernel.split_edge(edge_a, vertex);
-                    let (edge_b1, edge_b2) = kernel.split_edge(edge_b, vertex);
+                    // Split the edge
+                    let (edge_a1, edge_a2) = kernel.split_edge(edge_a, pt.clone());
+
+                    let split_vertex_a = kernel.vertices_for_edge(edge_a1).unwrap().1;
+                    // Edges should meet at a common point:
+                    assert_eq!(split_vertex_a, kernel.vertices_for_edge(edge_a2).unwrap().0);
+
+                    let (edge_b1, edge_b2) = kernel.split_edge(edge_b, pt.clone());
+                    let split_vertex_b = kernel.vertices_for_edge(edge_b1).unwrap().1;
+                    // Edges should meet at a common point:
+                    assert_eq!(split_vertex_b, kernel.vertices_for_edge(edge_b2).unwrap().0);
+
+                    let merged_vertex = kernel.merge_vertices(split_vertex_a, split_vertex_b, pt);
+
+                    let edge_a1 = kernel
+                        .replace_vertex_in_edge(edge_a1, split_vertex_a, merged_vertex)
+                        .unwrap();
+                    let edge_a2 = kernel
+                        .replace_vertex_in_edge(edge_a2, split_vertex_a, merged_vertex)
+                        .unwrap();
+                    let edge_b1 = kernel
+                        .replace_vertex_in_edge(edge_b1, split_vertex_b, merged_vertex)
+                        .unwrap();
+                    let edge_b2 = kernel
+                        .replace_vertex_in_edge(edge_b2, split_vertex_b, merged_vertex)
+                        .unwrap();
 
                     let old_a = self.remove(kernel, edge_a);
                     self.insert(kernel, edge_a1, old_a.hilbert_value, old_a.multiplicity);

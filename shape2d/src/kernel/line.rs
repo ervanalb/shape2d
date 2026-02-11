@@ -20,7 +20,8 @@ pub trait KernelF32 {
     fn pt(&self, v: Self::Vertex) -> [f32; 2];
     fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex);
 
-    fn merge_vertices(&mut self, pt: [f32; 2]) -> Self::Vertex;
+    fn merge_vertices(&mut self, a: Self::Vertex, b: Self::Vertex, pt: [f32; 2]) -> Self::Vertex;
+
     fn merge_edges(
         &mut self,
         a: Self::Edge,
@@ -28,25 +29,16 @@ pub trait KernelF32 {
         coincidence: EdgeCoincidence,
     ) -> Self::Edge;
 
-    fn nudge_edge(
+    fn new_edge_from_other(
         &mut self,
-        edge: Self::Edge,
-        new_start: Self::Vertex,
-        new_end: Self::Vertex,
+        old_edge: Self::Edge,
+        start: Self::Vertex,
+        end: Self::Vertex,
     ) -> Self::Edge;
-    fn split_edge(
-        &mut self,
-        edge: Self::Edge,
-        vertex: Self::Vertex,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge);
-    fn split_edges(
-        &mut self,
-        a: Self::Edge,
-        b: Self::Edge,
-        pt: [f32; 2],
-    ) -> (Self::Edge, Self::Edge);
-    fn new_offset_vertex(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex;
+
+    fn split_edge(&mut self, edge: Self::Edge, pt: [f32; 2]) -> (Self::Edge, Self::Edge);
+
+    fn new_vertex_from_other(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,17 +55,15 @@ where
     type Vertex = K::Vertex;
     type Edge = K::Edge;
     type Extents = ExtentsF32;
-    type MergePoint = [f32; 2];
+    type Point = [f32; 2];
     type MergeCurve = ();
-    type SplitPoint = [f32; 2];
-    type IntersectionPoint = [f32; 2];
     type SweepLineEdgePortion = ();
     type SweepLineEventPoint = K::Vertex; // TODO rename this or see if it should be Point instead
     type TriangleKernel = TriangleKernelF32;
     type CapStyle = CapStyleF32;
     type OffsetAmount = f32;
 
-    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::MergePoint> {
+    fn vertices_coincident(&self, a: Self::Vertex, b: Self::Vertex) -> Option<Self::Point> {
         let pt_a = self.pt(a);
         let pt_b = self.pt(b);
         let fp_mag = fp_mag_pt_f32(pt_a).max(fp_mag_pt_f32(pt_b));
@@ -98,7 +88,7 @@ where
         }
     }
 
-    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::SplitPoint> {
+    fn split(&self, vertex: Self::Vertex, edge: Self::Edge) -> Option<Self::Point> {
         let vertex_pt = self.pt(vertex);
         let edge_vs = self.vs(edge);
         let edge_start_pt = self.pt(edge_vs.0);
@@ -110,7 +100,7 @@ where
         point_on_segment_f32(vertex_pt, edge_start_pt, edge_end_pt, self.epsilon(fp_mag))
     }
 
-    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::IntersectionPoint> {
+    fn intersection(&self, a: Self::Edge, b: Self::Edge) -> Option<Self::Point> {
         let a_vs = self.vs(a);
         let b_vs = self.vs(b);
         if a_vs.0 == b_vs.0 || a_vs.0 == b_vs.1 || a_vs.1 == b_vs.0 || a_vs.1 == b_vs.1 {
@@ -126,21 +116,31 @@ where
         )
     }
 
-    /*
-    fn new_split_vertex(&mut self, pt: Self::SplitPoint) -> Self::Vertex {
-        <Self as KernelF32>::new_split_vertex(self, pt)
+    fn merge_vertices(
+        &mut self,
+        a: Self::Vertex,
+        b: Self::Vertex,
+        pt: Self::Point,
+    ) -> Self::Vertex {
+        <Self as KernelF32>::merge_vertices(self, a, b, pt)
     }
 
-    fn new_intersection_vertex(&mut self, pt: Self::IntersectionPoint) -> Self::Vertex {
-        <Self as KernelF32>::new_intersection_vertex(self, pt)
+    fn merge_edges(
+        &mut self,
+        a: Self::Edge,
+        b: Self::Edge,
+        coincidence: EdgeCoincidence,
+        _curve: Self::MergeCurve,
+    ) -> Self::Edge {
+        <Self as KernelF32>::merge_edges(self, a, b, coincidence)
     }
 
-    fn merge_vertices(&mut self, pt: Self::MergePoint) -> Self::Vertex {
-        <Self as KernelF32>::merge_vertices(pt)
-    }
-
-    fn merge_edges(&mut self, _curve: Self::MergeCurve) -> Self::Edge {
-        <Self as KernelF32::merge_edges(pt)
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        pt: Self::Point,
+    ) -> (Self::Edge, Self::Edge) {
+        <Self as KernelF32>::split_edge(self, edge, pt)
     }
 
     fn replace_vertex_in_edge(
@@ -153,24 +153,18 @@ where
 
         if start == old_v {
             if end == new_v {
-                return None; // Reflex edge
+                return None; // Self-edge
             }
             start = new_v;
         }
         if end == old_v {
             if start == new_v {
-                return None; // Reflex edge
+                return None; // Self-edge
             }
             end = new_v;
         }
-        Some(self.new_edge(edge, start, end))
+        Some(self.new_edge_from_other(edge, start, end))
     }
-
-    fn split_edge(&mut self, edge: Self::Edge, vertex: Self::Vertex) -> (Self::Edge, Self::Edge) {
-        self.new_split_edges(edge, vertex)
-    }
-
-    */
 
     fn extents(&self, edges: impl Iterator<Item = Self::Edge>) -> Self::Extents {
         extents_f32(
@@ -684,17 +678,78 @@ impl Ord for BitOrdPointF32 {
     }
 }
 
+impl BitOrdPointF32 {
+    const MIN: Self = BitOrdPointF32([f32::from_bits(u32::MIN), f32::from_bits(u32::MIN)]);
+    const MAX: Self = BitOrdPointF32([f32::from_bits(u32::MAX), f32::from_bits(u32::MAX)]);
+}
+
+impl From<[f32; 2]> for BitOrdPointF32 {
+    fn from(value: [f32; 2]) -> Self {
+        Self(value)
+    }
+}
+
+impl From<BitOrdPointF32> for [f32; 2] {
+    fn from(value: BitOrdPointF32) -> Self {
+        value.0
+    }
+}
+
 pub struct DirectKernelF32 {}
+
+impl Edge for (BitOrdPointF32, BitOrdPointF32) {
+    const MIN: Self = (BitOrdPointF32::MIN, BitOrdPointF32::MIN);
+    const MAX: Self = (BitOrdPointF32::MAX, BitOrdPointF32::MAX);
+
+    fn reversed(self) -> Self {
+        (self.1, self.0)
+    }
+}
 
 impl KernelF32 for DirectKernelF32 {
     type Vertex = BitOrdPointF32;
+    type Edge = (Self::Vertex, Self::Vertex);
 
     fn pt(&self, v: Self::Vertex) -> [f32; 2] {
-        v.0
+        v.into()
     }
 
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        BitOrdPointF32(pt)
+    fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex) {
+        e
+    }
+
+    fn merge_vertices(&mut self, _a: Self::Vertex, _b: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        pt.into()
+    }
+
+    fn merge_edges(
+        &mut self,
+        _a: Self::Edge,
+        _b: Self::Edge,
+        _coincidence: EdgeCoincidence,
+    ) -> Self::Edge {
+        panic!("Not possible for edges to share endpoints without being equal");
+    }
+
+    fn new_edge_from_other(
+        &mut self,
+        _old_edge: Self::Edge,
+        start: Self::Vertex,
+        end: Self::Vertex,
+    ) -> Self::Edge {
+        (start, end)
+    }
+
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge) {
+        ((edge.0, pt.into()), (pt.into(), edge.1))
+    }
+
+    fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        pt.into()
     }
 }
 
@@ -702,17 +757,59 @@ pub struct BasicKernelF32 {
     pub points: Vec<[f32; 2]>,
 }
 
+impl BasicKernelF32 {
+    fn insert_vertex(&mut self, pt: [f32; 2]) -> u32 {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
 impl KernelF32 for BasicKernelF32 {
     type Vertex = u32;
+    type Edge = (Self::Vertex, Self::Vertex);
 
     fn pt(&self, v: Self::Vertex) -> [f32; 2] {
         self.points[v as usize]
     }
 
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        let i = self.points.len() as u32;
-        self.points.push(pt);
-        i
+    fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex) {
+        e
+    }
+
+    fn merge_vertices(&mut self, _a: Self::Vertex, _b: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt)
+    }
+
+    fn merge_edges(
+        &mut self,
+        _a: Self::Edge,
+        _b: Self::Edge,
+        _coincidence: EdgeCoincidence,
+    ) -> Self::Edge {
+        panic!("Not possible for edges to share endpoints without being equal");
+    }
+
+    fn new_edge_from_other(
+        &mut self,
+        _old_edge: Self::Edge,
+        start: Self::Vertex,
+        end: Self::Vertex,
+    ) -> Self::Edge {
+        (start, end)
+    }
+
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge) {
+        let v = self.insert_vertex(pt);
+        ((edge.0, v), (v, edge.1))
+    }
+
+    fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt)
     }
 }
 
@@ -721,8 +818,17 @@ pub struct BasicKernelF32WithCustomEpsilon {
     pub epsilon: f32,
 }
 
+impl BasicKernelF32WithCustomEpsilon {
+    fn insert_vertex(&mut self, pt: [f32; 2]) -> u32 {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        i
+    }
+}
+
 impl KernelF32 for BasicKernelF32WithCustomEpsilon {
     type Vertex = u32;
+    type Edge = (Self::Vertex, Self::Vertex);
 
     fn epsilon(&self, fp_mag: f32) -> f32 {
         self.epsilon.max(EPSILON_RATE_F32 * fp_mag)
@@ -732,10 +838,43 @@ impl KernelF32 for BasicKernelF32WithCustomEpsilon {
         self.points[v as usize]
     }
 
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        let i = self.points.len() as u32;
-        self.points.push(pt);
-        i
+    fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex) {
+        e
+    }
+
+    fn merge_vertices(&mut self, _a: Self::Vertex, _b: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt)
+    }
+
+    fn merge_edges(
+        &mut self,
+        _a: Self::Edge,
+        _b: Self::Edge,
+        _coincidence: EdgeCoincidence,
+    ) -> Self::Edge {
+        panic!("Not possible for edges to share endpoints without being equal");
+    }
+
+    fn new_edge_from_other(
+        &mut self,
+        _old_edge: Self::Edge,
+        start: Self::Vertex,
+        end: Self::Vertex,
+    ) -> Self::Edge {
+        (start, end)
+    }
+
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge) {
+        let v = self.insert_vertex(pt);
+        ((edge.0, v), (v, edge.1))
+    }
+
+    fn new_vertex_from_other(&mut self, _v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt)
     }
 }
 
@@ -744,17 +883,73 @@ pub struct ColorKernelF32 {
     pub colors: Vec<[f32; 4]>,
 }
 
+impl ColorKernelF32 {
+    fn insert_vertex(&mut self, pt: [f32; 2], color: [f32; 4]) -> u32 {
+        let i = self.points.len() as u32;
+        self.points.push(pt);
+        self.colors.push(color);
+        i
+    }
+
+    fn color(&self, v: u32) -> [f32; 4] {
+        self.colors[v as usize]
+    }
+}
+
+fn average_colors(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    [
+        0.5 * (a[0] + b[0]),
+        0.5 * (a[1] + b[1]),
+        0.5 * (a[2] + b[2]),
+        0.5 * (a[3] + b[3]),
+    ]
+}
+
 impl KernelF32 for ColorKernelF32 {
     type Vertex = u32;
+    type Edge = (Self::Vertex, Self::Vertex);
 
     fn pt(&self, v: Self::Vertex) -> [f32; 2] {
         self.points[v as usize]
     }
 
-    fn new_vertex(&mut self, pt: [f32; 2]) -> Self::Vertex {
-        let i = self.points.len() as u32;
-        self.points.push(pt);
-        i
+    fn vs(&self, e: Self::Edge) -> (Self::Vertex, Self::Vertex) {
+        e
+    }
+
+    fn merge_vertices(&mut self, a: Self::Vertex, b: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt, average_colors(self.color(a), self.color(b)))
+    }
+
+    fn merge_edges(
+        &mut self,
+        _a: Self::Edge,
+        _b: Self::Edge,
+        _coincidence: EdgeCoincidence,
+    ) -> Self::Edge {
+        panic!("Not possible for edges to share endpoints without being equal");
+    }
+
+    fn new_edge_from_other(
+        &mut self,
+        _old_edge: Self::Edge,
+        start: Self::Vertex,
+        end: Self::Vertex,
+    ) -> Self::Edge {
+        (start, end)
+    }
+
+    fn split_edge(
+        &mut self,
+        edge: Self::Edge,
+        pt: [f32; 2],
+    ) -> (Self::Edge, Self::Edge) {
+        let v = self.insert_vertex(pt, self.color(edge.0)); // XXX blend color
+        ((edge.0, v), (v, edge.1))
+    }
+
+    fn new_vertex_from_other(&mut self, v: Self::Vertex, pt: [f32; 2]) -> Self::Vertex {
+        self.insert_vertex(pt, self.color(v))
     }
 }
 
